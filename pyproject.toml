@@ -3,7 +3,6 @@ name = "lang-pz-workflow"
 version = "0.1.0"
 description = "LangGraph workflow for contractor service"
 authors = ["Your Name <your.email@example.com>"]
-readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.11"
