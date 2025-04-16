@@ -1,19 +1,18 @@
 [tool.poetry]
-package-mode = false
+name = "lang-pz-workflow"
+version = "0.1.0"
+description = "LangGraph workflow for contractor service"
+authors = ["Your Name <your.email@example.com>"]
+readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.11"  # Changed to match deployment environment
-langgraph = ">=0.1.0"  # Updated for compatibility
-langchain-anthropic = "^0.3.10"
-langchain-community = "^0.3.21"
-pydantic = ">=2.0"
-langgraph-cli = {extras = ["inmem"], version = "^0.1.89"}
+python = "^3.11"
+langgraph = ">=0.1.0"
 langchain-openai = "^0.3.12"
-requests = ">=2.0.0"
-langgraph-sdk = "^0.1.61"
-debugpy = "^1.8.13"
 langchain = "^0.3.23"
 langsmith = "^0.3.28"
+pydantic = ">=2.0,<3.0"
+requests = ">=2.0.0"
 multidict = "6.0.4"
 
 [build-system]
