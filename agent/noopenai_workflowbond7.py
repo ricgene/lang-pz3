@@ -1,6 +1,6 @@
-# Implementation of workflowbond7.py with API intent detection and recursion fixes
+# Fixed implementation of workflowbond7.py with no recursion issues
 
-from typing import TypedDict, Dict, Any, List, Annotated, Literal
+from typing import TypedDict, Dict, Any, List, Annotated
 from langgraph.graph import StateGraph, END
 import os
 from langsmith.run_helpers import traceable
@@ -8,8 +8,8 @@ import json
 from datetime import datetime
 from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage, AIMessage
 from langgraph.graph import add_messages
-from functools import lru_cache
 import sys
+from functools import lru_cache
 
 # Safe environment variable handling
 try:
@@ -25,21 +25,17 @@ class AgentState(TypedDict):
     messages: Annotated[List[BaseMessage], add_messages]  # For conversation tracking
     current_step: str  # For tracking workflow progress
     skills_used: list  # Track which skills were used in the session
-    processed_inputs: list  # Track processed inputs to avoid loops
+    human_input_received: bool  # Flag to indicate if we've received human input
 
 # Initialize Models with error handling
 @lru_cache(maxsize=4)
-def _get_model(model_name: str):
-    """Get a model with the specified name"""
+def get_model():
+    """Get a model for generating responses"""
     try:
-        if model_name == "openai":
-            model = ChatOpenAI(temperature=0, model_name="gpt-4o")
-            return model
-        else:
-            raise ValueError(f"Unsupported model type: {model_name}")
+        model = ChatOpenAI(temperature=0.7, model_name="gpt-4o")
+        return model
     except Exception as e:
         print(f"Error initializing model: {str(e)}")
-        # Return a mock model if initialization fails
         return None
 
 # Node Implementations
@@ -58,8 +54,8 @@ def validate_input(state: AgentState):
         state["messages"] = []
     if "skills_used" not in state:
         state["skills_used"] = []
-    if "processed_inputs" not in state:
-        state["processed_inputs"] = []  # Track processed inputs
+    if "human_input_received" not in state:
+        state["human_input_received"] = False
         
     return state
 
@@ -100,38 +96,38 @@ Your current skills:
     
     return {
         "messages": messages,
-        "current_step": "process_input"
+        "current_step": "human_step"  # Go to the human_step node to wait for input
+    }
+
+@traceable(project_name="007-productivity-agent")
+def human_step(state: AgentState):
+    """Wait for human input - this is an explicit step to prevent recursion"""
+    
+    # Check if we have a human message as the last message
+    if state["messages"] and len(state["messages"]) > 0:
+        last_message = state["messages"][-1]
+        if isinstance(last_message, HumanMessage):
+            # We have received human input, so process it
+            return {
+                "human_input_received": True,
+                "current_step": "process_input"
+            }
+    
+    # No human input received, so just stay in this state
+    # This is a terminal state for the graph until external input is provided
+    return {
+        "current_step": END
     }
 
 @traceable(project_name="007-productivity-agent")
 def process_input(state: AgentState):
     """Process user input and determine next action"""
+    # Reset the human_input_received flag
+    state["human_input_received"] = False
     
     # Get the latest message from the user
-    if not state["messages"] or len(state["messages"]) == 0:
-        return {
-            "current_step": "end_session"
-        }
-        
     latest_message = state["messages"][-1]
-    
-    # Skip if not a human message
-    if not isinstance(latest_message, HumanMessage):
-        return {
-            "current_step": "general_question"
-        }
-    
-    # Check if we've already processed this exact input to avoid loops
     message_content = latest_message.content
-    if "processed_inputs" in state and message_content in state["processed_inputs"]:
-        return {
-            "messages": [AIMessage(content="I seem to be caught in a loop. Let's move on. How can I help you with something else?")],
-            "current_step": "general_question"
-        }
-    
-    # Add to processed inputs
-    processed_inputs = state.get("processed_inputs", [])
-    processed_inputs.append(message_content)
     
     # If we're still in the introduction phase and don't know the user's name
     if state["user"].get("name") is None:
@@ -142,82 +138,32 @@ def process_input(state: AgentState):
             return {
                 "user": {"name": name},
                 "messages": [AIMessage(content=f"Nice to meet you, {name}! How can I help you today?")],
-                "processed_inputs": processed_inputs,
-                "current_step": "general_question"  # Changed to avoid recursion
+                "current_step": "human_step"
             }
     
-    # Otherwise, determine what the user wants with API intent detection
-    model = _get_model("openai")
-    if not model:
-        # Fallback if model not available
-        return {
-            "messages": [AIMessage(content="I'm sorry, but I'm having trouble processing your request right now. Please try again later.")],
-            "processed_inputs": processed_inputs,
-            "current_step": "end_session"
-        }
+    # Determine intent based on keywords
+    intent = "general_question"  # Default intent
+    lower_content = message_content.lower()
     
-    # Analyze user intent with API
-    system_prompt = """You are analyzing user input to determine their intent.
-Categories:
-- add_todo: User wants to add a task to their todo list
-- view_todos: User wants to see their todo list
-- general_question: User has a general question
-- end_conversation: User wants to end the conversation
-
-Format your response as a JSON object with two fields:
-- "intent": One of the categories above
-- "details": Additional details extracted from the message
-
-Example:
-{"intent": "add_todo", "details": "Buy milk tomorrow"}"""
+    if "add" in lower_content and ("todo" in lower_content or "task" in lower_content):
+        intent = "add_todo"
+    elif "show" in lower_content and ("todo" in lower_content or "task" in lower_content):
+        intent = "view_todos"
+    elif "list" in lower_content and ("todo" in lower_content or "task" in lower_content):
+        intent = "view_todos"
+    elif any(word in lower_content for word in ["bye", "exit", "quit", "goodbye"]):
+        intent = "end_conversation"
     
-    # Get user intent with fixed approach
-    try:
-        messages_for_intent = [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=message_content)
-        ]
-        intent_response = model.invoke(messages_for_intent)
-        
-        # Try to parse the intent from the model response
-        try:
-            intent_data = json.loads(intent_response.content)
-            intent = intent_data.get("intent", "general_question")
-            details = intent_data.get("details", "")
-        except json.JSONDecodeError:
-            # Fallback intent detection with keywords if JSON parsing fails
-            intent = "general_question"  # Default
-            lower_content = message_content.lower()
-            
-            if "add" in lower_content and ("todo" in lower_content or "task" in lower_content):
-                intent = "add_todo"
-            elif "show" in lower_content and ("todo" in lower_content or "task" in lower_content):
-                intent = "view_todos"
-            elif "list" in lower_content and ("todo" in lower_content or "task" in lower_content):
-                intent = "view_todos"
-            elif "bye" in lower_content or "exit" in lower_content or "quit" in lower_content:
-                intent = "end_conversation"
-            
-            details = ""
-        
-        # Add the intent to skills used
-        skills_used = state["skills_used"] 
-        if intent not in skills_used:
-            skills_used.append(intent)
-        
-        # Route to appropriate action
-        return {
-            "skills_used": skills_used,
-            "processed_inputs": processed_inputs,
-            "current_step": intent
-        }
-    except Exception as e:
-        print(f"Error in intent detection: {str(e)}")
-        # Fallback to general question
-        return {
-            "processed_inputs": processed_inputs,
-            "current_step": "general_question"
-        }
+    # Add the intent to skills used
+    skills_used = state["skills_used"] 
+    if intent not in skills_used:
+        skills_used.append(intent)
+    
+    # Route to appropriate action
+    return {
+        "skills_used": skills_used,
+        "current_step": intent
+    }
 
 @traceable(project_name="007-productivity-agent")
 def add_todo(state: AgentState):
@@ -248,7 +194,7 @@ def add_todo(state: AgentState):
     return {
         "todos": todos,
         "messages": [AIMessage(content=f"I've added \"{task}\" to your todo list. Is there anything else you'd like me to do?")],
-        "current_step": "general_question"  # Changed to avoid recursion
+        "current_step": "human_step"
     }
 
 @traceable(project_name="007-productivity-agent")
@@ -267,48 +213,55 @@ def view_todos(state: AgentState):
     
     return {
         "messages": [AIMessage(content=response)],
-        "current_step": "general_question"  # Changed to avoid recursion
+        "current_step": "human_step"
     }
 
 @traceable(project_name="007-productivity-agent")
 def general_question(state: AgentState):
     """Handle general questions"""
     
-    # If no messages, return generic response
-    if not state["messages"] or len(state["messages"]) == 0:
-        return {
-            "messages": [AIMessage(content="How can I help you today?")],
-            "current_step": "process_input"
-        }
-    
     # Get the latest message
     latest_message = state["messages"][-1]
     
-    # Use the model to generate a response
-    model = _get_model("openai")
-    if not model:
-        return {
-            "messages": [AIMessage(content="I'm sorry, but I'm having trouble answering your question right now. Please try again later.")],
-            "current_step": "process_input"
-        }
+    # Use a simple rule-based response system
+    content = latest_message.content.lower()
     
-    # Generate response - only use the relevant context
-    # To prevent large context windows, only use the last few messages
-    relevant_messages = state["messages"][-5:]  # Get last 5 messages max
+    # Default response
+    response = "I'm here to help you stay productive. Would you like to add a task to your todo list or see your current tasks?"
+    
+    # Check for common phrases
+    if "hello" in content or "hi" in content:
+        response = "Hello there! How can I help you today with your productivity tasks?"
+    elif "how are you" in content:
+        response = "I'm functioning perfectly! Thank you for asking. How can I help you with your tasks today?"
+    elif "help" in content:
+        response = "I can help you manage your tasks and boost your productivity. Try asking me to add a task or show your to-do list!"
+    elif "thank" in content:
+        response = "You're welcome! Is there anything else I can help you with?"
+    elif "langgraph" in content:
+        response = "LangGraph is a powerful framework for building AI applications with structured workflows. It's what makes me work!"
+    elif "langchain" in content:
+        response = "LangChain is a framework for developing applications powered by language models. It's a key technology behind agents like me."
+    elif "capability" in content or "do you do" in content or "can you" in content:
+        response = "I can help you manage your tasks with my to-do list functionality. I can add tasks, show your current tasks, and chat with you about productivity topics."
     
     try:
-        response = model.invoke(relevant_messages)
-        return {
-            "messages": [response],
-            "current_step": "process_input"
-        }
+        # Try to use the model if available
+        model = get_model()
+        if model:
+            # Only use the last few messages to keep context small
+            context = state["messages"][-5:]  # Last 5 messages max
+            model_response = model.invoke(context)
+            if model_response and model_response.content:
+                response = model_response.content
     except Exception as e:
-        print(f"Error generating response: {str(e)}")
-        # Fallback response
-        return {
-            "messages": [AIMessage(content="I'm here to help you stay productive. Would you like to add a task to your todo list or see your current tasks?")],
-            "current_step": "process_input"
-        }
+        print(f"Error using model: {str(e)}")
+        # Continue with rule-based response
+    
+    return {
+        "messages": [AIMessage(content=response)],
+        "current_step": "human_step"
+    }
 
 @traceable(project_name="007-productivity-agent")
 def end_conversation(state: AgentState):
@@ -328,13 +281,6 @@ def end_conversation(state: AgentState):
         "current_step": END
     }
 
-@traceable(project_name="007-productivity-agent")
-def end_session(state: AgentState):
-    """End session due to error or other issue"""
-    return {
-        "current_step": END
-    }
-
 # Define the workflow graph
 def create_agent_graph():
     """Create the workflow graph"""
@@ -345,17 +291,27 @@ def create_agent_graph():
     workflow.add_node("validate_input", validate_input)
     workflow.add_node("initialize_agent", initialize_agent)
     workflow.add_node("generate_greeting", generate_greeting)
+    workflow.add_node("human_step", human_step)  # This is a special node that waits for human input
     workflow.add_node("process_input", process_input)
     workflow.add_node("add_todo", add_todo)
     workflow.add_node("view_todos", view_todos)
     workflow.add_node("general_question", general_question)
     workflow.add_node("end_conversation", end_conversation)
-    workflow.add_node("end_session", end_session)
     
     # Define edges
     workflow.add_edge("validate_input", "initialize_agent")
     workflow.add_edge("initialize_agent", "generate_greeting")
-    workflow.add_edge("generate_greeting", "process_input")
+    workflow.add_edge("generate_greeting", "human_step")
+    
+    # From human_step, conditionally go to process_input if human input is received
+    workflow.add_conditional_edges(
+        "human_step",
+        lambda state: state["current_step"],
+        {
+            "process_input": "process_input",
+            END: END  # End the current execution if no human input
+        }
+    )
     
     # From process_input, go to specific handlers
     workflow.add_conditional_edges(
@@ -366,13 +322,14 @@ def create_agent_graph():
             "view_todos": "view_todos", 
             "general_question": "general_question",
             "end_conversation": "end_conversation",
-            "end_session": "end_session"
+            "human_step": "human_step"
         }
     )
     
-    # Changed: set general_question to go to process_input
-    # But add_todo and view_todos will go to general_question to avoid recursion
-    workflow.add_edge("general_question", "process_input")
+    # All handlers go back to human_step
+    workflow.add_edge("add_todo", "human_step")
+    workflow.add_edge("view_todos", "human_step")
+    workflow.add_edge("general_question", "human_step")
     
     # Set entry point
     workflow.set_entry_point("validate_input")
@@ -389,7 +346,14 @@ def main():
     workflow = create_agent_graph().compile()
     
     # Initial empty state
-    state = {"messages": []}
+    state = {
+        "messages": [],
+        "user": {"name": None},
+        "todos": [],
+        "skills_used": [],
+        "human_input_received": False,
+        "current_step": "validate_input"
+    }
     
     # Print welcome
     print("\n=== 007 Productivity Agent ===\n")
@@ -406,6 +370,10 @@ def main():
         
         # Main conversation loop
         while True:
+            # If the workflow ended, break out
+            if result["current_step"] == END:
+                break
+                
             # Get user input
             user_input = input("\nYou: ")
             
@@ -414,16 +382,17 @@ def main():
                 break
             
             # Add user message to state
-            state = result.copy()
-            state["messages"].append(HumanMessage(content=user_input))
+            result_copy = result.copy()
+            result_copy["messages"].append(HumanMessage(content=user_input))
+            result_copy["human_input_received"] = True
             
             # Invoke workflow
             try:
-                result = workflow.invoke(state)
+                result = workflow.invoke(result_copy)
                 
                 # Print agent's response
                 for message in result["messages"]:
-                    if isinstance(message, AIMessage):
+                    if isinstance(message, AIMessage) and message not in result_copy["messages"]:
                         print(f"Agent: {message.content}")
                 
                 # Check if workflow ended
@@ -432,6 +401,9 @@ def main():
             except Exception as e:
                 print(f"\nError processing your request: {str(e)}")
                 print("Let's try again.")
+                
+                # Continue the conversation
+                result = result_copy
     except Exception as e:
         print(f"\n❌ Error running agent: {str(e)}")
         import traceback
