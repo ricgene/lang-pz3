@@ -1,3 +1,9 @@
+more claude project directions:
+- I am using bash.  I am using pip an requirements.txt, not poetry,
+- I am using a venv ( 3.11 )
+- my agent graph is in 007-workflow.py
+
+
 # Contractor Workflow
 
 A LangGraph workflow for connecting customers with vendors based on sentiment analysis.
@@ -20,7 +26,13 @@ This project is designed to be deployed to LangSmith.
 
 # Test locally from file
 cd ~/gitl/lang-pz3
-poetry run python workflow2.py
+# python3.11 -m venv .venv_py311
+source .venv_py311/bin/activate
+# pip install -r requirements.txt
+python agent/007-workflow.py
+
+## poetry env use python3.11 && poetry run python agent/007-workflow.py
+
 
 # to run workflow2.py locally in studio
 poetry run langgraph dev
