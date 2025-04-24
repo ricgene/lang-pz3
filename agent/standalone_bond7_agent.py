@@ -69,8 +69,8 @@ class MockLanguageModel:
             "name_recall": "Your name is {name}. Is there anything else I can help you with?"
         }
     
-    def __call__(self, messages, *args, **kwargs):
-        """Make the object callable like a real LLM"""
+    def invoke(self, messages, *args, **kwargs):
+        """Make the object invoke-able like a real LLM"""
         self.call_count += 1
         print(f"🔍 MOCK MODEL ({self.name}) CALLED (call #{self.call_count})")
         print(f"📥 Input messages: {len(messages)} message(s)")
@@ -146,8 +146,8 @@ def get_model(model_name: str = "openai", system_prompt: str = None, mocked: boo
             model = ChatOpenAI(temperature=0, model_name="gpt-4o")
             
             if system_prompt:
-                print(f"🧠 Binding system prompt: {system_prompt[:50]}...")
-                model = model.bind(system_message=system_prompt)
+                print(f"🧠 Using system prompt: {system_prompt[:50]}...")
+                # Don't bind system message directly to the model
             
             return model
         else:
@@ -188,22 +188,21 @@ Your current skills:
 Your first message should ask for the user's name if you don't know it yet."""
     
     # Get the model (real or mocked)
-    model = get_model("openai", system_prompt, mocked=is_mocked)
+    model = get_model("openai", mocked=is_mocked)
     print(f"📊 Got model: {type(model).__name__}")
-    
-    # Initial message to start the conversation
-    initial_message = SystemMessage(content=system_prompt)
     
     # Determine greeting message
     try:
-        print("🚀 Calling model to generate greeting")
-        # We only have a system message at this point
-        messages = [initial_message]
+        print("🚀 Calling OpenAI model to generate greeting")
+        # Create messages list with system message
+        messages = [SystemMessage(content=system_prompt)]
         
         start_time = time.time()
-        response = model(messages)
-        end_time = time.time()
         
+        # Call the model with messages including system message
+        response = model.invoke(messages)
+        
+        end_time = time.time()
         print(f"✅ Greeting generated in {end_time - start_time:.2f}s")
         greeting = response.content
     except Exception as e:
@@ -295,11 +294,15 @@ If the user asks about tasks, offer to create a task for them."""
     
     # Get model
     try:
-        print("🚀 Calling model to generate response")
-        model = get_model("openai", system_prompt, mocked=is_mocked)
+        print("🚀 Calling OpenAI model to generate response")
+        model = get_model("openai", mocked=is_mocked)
+        
+        # Create a new messages list with system message first
+        full_messages = [SystemMessage(content=system_prompt)] + messages
         
         start_time = time.time()
-        response = model(messages)
+        # Use invoke() method with all messages including system message
+        response = model.invoke(full_messages)
         end_time = time.time()
         
         print(f"✅ Response generated in {end_time - start_time:.2f}s")
