@@ -38,6 +38,7 @@ class MockLanguageModel:
         self.responses = {
             "greeting": "Hello! I'm 007, your personal productivity agent. I don't think we've met before. What's your name?",
             "task_added": "I've added that task to your list. Is there anything else you'd like me to help you with?",
+            "name_intro": "Nice to meet you! How can I help you today? I can help with tasks, finding information, and more.",
             "fallback": "I understand. How can I assist you further?"
         }
     
@@ -47,7 +48,8 @@ class MockLanguageModel:
         print(f"🔍 MOCK MODEL ({self.name}) CALLED (call #{self.call_count})")
         print(f"📥 Input messages: {len(messages)} message(s)")
         
-        # Print a sample of the last message to help with debugging
+        # Get the last message to help with context detection
+        last_msg = None
         if messages and len(messages) > 0:
             last_msg = messages[-1]
             last_content = getattr(last_msg, 'content', str(last_msg))
@@ -55,10 +57,20 @@ class MockLanguageModel:
         
         # Determine which response to use based on message content
         response_key = "fallback"
-        if any("name" in str(m).lower() for m in messages):
-            response_key = "greeting"
-        elif any("task" in str(m).lower() for m in messages):
+        
+        # If system prompt mentions name introduction
+        system_content = ""
+        for msg in messages:
+            if getattr(msg, 'type', '') == 'system':
+                system_content = getattr(msg, 'content', '')
+                break
+                
+        if "just learned their name" in system_content or "what's your name" in system_content:
+            response_key = "name_intro"
+        elif last_msg and "task" in getattr(last_msg, 'content', '').lower():
             response_key = "task_added"
+        elif any("name" in str(m).lower() for m in messages):
+            response_key = "greeting"
         
         response_text = self.responses[response_key]
         print(f"📤 Responding with: {response_key} -> {response_text[:50]}...")
@@ -73,7 +85,7 @@ class MockLanguageModel:
 
 @traceable(project_name="007-productivity-agent")
 def process_input(state: AgentState):
-    """Process user input and generate a response with model interaction"""
+    """Process user input and generate a response using the language model"""
     print("🏁 Entering process_input function")
     
     # Get current messages
@@ -89,56 +101,128 @@ def process_input(state: AgentState):
     
     if not last_human_message:
         print("⚠️ No human message found in state")
-        return {
-            **state,
-            "current_step": "awaiting_input"
-        }
+        return state
     
     print(f"👤 Last human message: {last_human_message.content[:100]}...")
     
-    # Determine if we're in mocked mode
-    is_mocked = os.environ.get("MOCK_MODE", "False").lower() == "true"
-    print(f"⚙️ process_input: Mocked mode = {is_mocked}")
+    # Check if this is a name introduction
+    is_name_introduction = False
+    if len(messages) >= 2:
+        # The previous ai message was asking for name, and this is the first human response
+        prev_ai_message = None
+        for msg in reversed(messages[:-1]):  # All but the last message (which is the human's)
+            if isinstance(msg, AIMessage):
+                prev_ai_message = msg
+                break
+        
+        if prev_ai_message and "what's your name" in prev_ai_message.content.lower():
+            is_name_introduction = True
+            print("🔍 Detected name introduction context")
     
-    # Get model (real or mocked)
-    system_prompt = """You are 007, a personal productivity agent.
-You help users manage their tasks, find information, and boost their productivity."""
-    
-    model = _get_model("openai", system_prompt, mocked=is_mocked)
-    
-    # Call the model 
-    try:
-        print("🚀 Calling model to generate response")
-        import time
-        start_time = time.time()
+    # Process name introduction if detected
+    if is_name_introduction:
+        # Extract name
+        name_parts = last_human_message.content.split("my name is ")
+        if len(name_parts) > 1:
+            name = name_parts[1].strip()
+        else:
+            name = last_human_message.content.strip()
+        
+        # Update user name in state
+        state["user"]["name"] = name
+        print(f"📊 Updated user name to: {name}")
+        
+        # Determine if we're in mocked mode
+        is_mocked = os.environ.get("MOCK_MODE", "False").lower() == "true"
+        print(f"⚙️ process_input: Mocked mode = {is_mocked}")
         
         if is_mocked:
-            # In mocked mode, we use the mock model's response logic
-            response = model(messages)
+            # Use predefined response in mocked mode
+            response_content = f"Nice to meet you, {name}! How can I help you today? I can help you manage tasks, find information, or assist with your productivity needs."
+            print(f"🔄 Using pre-defined response in mocked mode: {response_content[:50]}...")
+            response = AIMessage(content=response_content)
         else:
-            # In real mode, we'd make the actual API call
-            response = model(messages)
+            # Prepare system prompt for model
+            system_prompt = f"""You are 007, a personal productivity agent.
+You help users manage their tasks, find information, and boost their productivity.
+The user's name is {name}. You've just learned their name, so respond warmly and introduce your capabilities.
+Keep your response concise and friendly."""
             
-        end_time = time.time()
-        print(f"✅ Response generated in {end_time - start_time:.2f}s")
-        print(f"💬 Response content: {response.content[:100]}...")
+            # Get model
+            try:
+                print("🚀 Calling OpenAI model to generate response")
+                model = _get_model("openai", system_prompt, mocked=is_mocked)
+                
+                import time
+                start_time = time.time()
+                response = model(messages)
+                end_time = time.time()
+                
+                print(f"✅ Response generated in {end_time - start_time:.2f}s")
+                print(f"💬 Response content: {response.content[:100]}...")
+            except Exception as e:
+                print(f"❌ Error calling model: {str(e)}")
+                response = AIMessage(content=f"Nice to meet you, {name}! How can I help you today?")
+    else:
+        # This is a regular message, not a name introduction
+        # Determine if we're in mocked mode
+        is_mocked = os.environ.get("MOCK_MODE", "False").lower() == "true"
+        print(f"⚙️ process_input: Mocked mode = {is_mocked}")
         
-        # Add response to messages
-        messages.append(response)
-        
-        return {
-            **state,
-            "messages": messages,
-            "current_step": "process_input"  # Loop back to handle next input
-        }
-    except Exception as e:
-        print(f"❌ Error generating response: {str(e)}")
-        error_response = AIMessage(content="I'm having trouble processing that. Can you try again?")
-        return {
-            **state,
-            "messages": messages + [error_response],
-            "current_step": "process_input"
-        }
+        if is_mocked:
+            # Simplified logic for mocked responses
+            if "task" in last_human_message.content.lower() or "todo" in last_human_message.content.lower():
+                response_content = "I've noted that task. Would you like me to add anything else to your list?"
+            elif "help" in last_human_message.content.lower() or "what can you do" in last_human_message.content.lower():
+                response_content = "I can help you manage tasks, find information, and boost your productivity. What would you like assistance with today?"
+            else:
+                response_content = "I understand. Is there anything specific you'd like help with today?"
+            
+            print(f"🔄 Using pre-defined response in mocked mode: {response_content[:50]}...")
+            response = AIMessage(content=response_content)
+        else:
+            # Get user name if available
+            user_name = state["user"].get("name", "")
+            
+            # Prepare system prompt for model
+            system_prompt = f"""You are 007, a personal productivity agent.
+You help users manage their tasks, find information, and boost their productivity.
+You have a friendly, helpful tone.
+The user's name is {user_name if user_name else 'unknown'}.
+Keep your responses concise and focused."""
+            
+            # Get model
+            try:
+                print("🚀 Calling OpenAI model to generate response")
+                model = _get_model("openai", system_prompt, mocked=is_mocked)
+                
+                import time
+                start_time = time.time()
+                response = model(messages)
+                end_time = time.time()
+                
+                print(f"✅ Response generated in {end_time - start_time:.2f}s")
+                print(f"💬 Response content: {response.content[:100]}...")
+            except Exception as e:
+                print(f"❌ Error calling model: {str(e)}")
+                response = AIMessage(content="I understand. Is there anything specific you'd like help with today?")
+    
+    # Add the response to messages
+    messages.append(response)
+    
+    # Skills tracking - simple version
+    skills_used = state.get("skills_used", [])
+    if "task" in last_human_message.content.lower() or "todo" in last_human_message.content.lower():
+        if "task_management" not in skills_used:
+            skills_used.append("task_management")
+    
+    # Update the state with new messages and other changes
+    return {
+        **state,
+        "messages": messages,
+        "skills_used": skills_used,
+        "current_step": "process_input"  # Loop back to handle next input
+    }
 
 # Initialize Models with error handling
 @lru_cache(maxsize=4)
@@ -166,6 +250,7 @@ def _get_model(model_name: str, system_prompt: str = None, mocked: bool = False)
     except Exception as e:
         print(f"❌ Error initializing model: {str(e)}")
         # Return a mock model if initialization fails
+        print("⚠️ Returning MockLanguageModel as fallback")
         return MockLanguageModel(f"error-fallback-{model_name}")
 
 # Node Implementations
@@ -267,112 +352,6 @@ def human_step(state: AgentState):
         "current_step": END
     }
 
-@traceable(project_name="007-productivity-agent")
-def process_input(state: AgentState):
-    """Process user input and determine next action"""
-    # Reset the human_input_received flag
-    state["human_input_received"] = False
-    
-    # Get the latest message from the user
-    latest_message = state["messages"][-1]
-    message_content = latest_message.content
-    
-    # If we're still in the introduction phase and don't know the user's name
-    if state["user"].get("name") is None:
-        # Extract name from message
-        name = message_content.strip()
-        if len(name) > 0:
-            # Update user info
-            return {
-                "user": {"name": name},
-                "messages": [AIMessage(content=f"Nice to meet you, {name}! How can I help you today?")],
-                "current_step": "human_step"
-            }
-    
-    # Use OpenAI for intent detection
-    try:
-        model = get_model()
-        if model:
-            # Create system prompt for intent detection
-            system_prompt = """You are analyzing user input to determine their intent.
-Categories:
-- add_todo: User wants to add a task to their todo list
-- view_todos: User wants to see their todo list
-- general_question: User has a general question
-- end_conversation: User wants to end the conversation
-
-Format your response as a JSON object with two fields:
-- "intent": One of the categories above
-- "details": Additional details extracted from the message
-
-Example:
-{"intent": "add_todo", "details": "Buy milk tomorrow"}"""
-            
-            # Prepare messages for intent detection
-            intent_messages = [
-                SystemMessage(content=system_prompt),
-                HumanMessage(content=message_content)
-            ]
-            
-            # Get the intent
-            intent_response = model.invoke(intent_messages)
-            
-            try:
-                # Parse the JSON response
-                intent_data = json.loads(intent_response.content)
-                intent = intent_data.get("intent", "general_question")
-                details = intent_data.get("details", "")
-            except json.JSONDecodeError:
-                # Fallback to keyword-based intent detection
-                intent = "general_question"  # Default
-                lower_content = message_content.lower()
-                
-                if "add" in lower_content and ("todo" in lower_content or "task" in lower_content):
-                    intent = "add_todo"
-                elif "show" in lower_content and ("todo" in lower_content or "task" in lower_content):
-                    intent = "view_todos"
-                elif "list" in lower_content and ("todo" in lower_content or "task" in lower_content):
-                    intent = "view_todos"
-                elif any(word in lower_content for word in ["bye", "exit", "quit", "goodbye"]):
-                    intent = "end_conversation"
-        else:
-            # Fallback to keyword-based intent detection if model is not available
-            intent = "general_question"  # Default
-            lower_content = message_content.lower()
-            
-            if "add" in lower_content and ("todo" in lower_content or "task" in lower_content):
-                intent = "add_todo"
-            elif "show" in lower_content and ("todo" in lower_content or "task" in lower_content):
-                intent = "view_todos"
-            elif "list" in lower_content and ("todo" in lower_content or "task" in lower_content):
-                intent = "view_todos"
-            elif any(word in lower_content for word in ["bye", "exit", "quit", "goodbye"]):
-                intent = "end_conversation"
-    except Exception as e:
-        print(f"Error in intent detection: {str(e)}")
-        # Fallback to keyword-based intent detection
-        intent = "general_question"  # Default
-        lower_content = message_content.lower()
-        
-        if "add" in lower_content and ("todo" in lower_content or "task" in lower_content):
-            intent = "add_todo"
-        elif "show" in lower_content and ("todo" in lower_content or "task" in lower_content):
-            intent = "view_todos"
-        elif "list" in lower_content and ("todo" in lower_content or "task" in lower_content):
-            intent = "view_todos"
-        elif any(word in lower_content for word in ["bye", "exit", "quit", "goodbye"]):
-            intent = "end_conversation"
-    
-    # Add the intent to skills used
-    skills_used = state["skills_used"] 
-    if intent not in skills_used:
-        skills_used.append(intent)
-    
-    # Route to appropriate action
-    return {
-        "skills_used": skills_used,
-        "current_step": intent
-    }
 
 @traceable(project_name="007-productivity-agent")
 def add_todo(state: AgentState):
