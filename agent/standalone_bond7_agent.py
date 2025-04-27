@@ -8,6 +8,8 @@ import argparse
 import os
 import sys
 import time
+import json
+from pathlib import Path
 from typing import Dict, List, Any, TypedDict, Annotated
 from functools import lru_cache
 
@@ -46,11 +48,18 @@ class AgentState(dict):
     """Simplified AgentState that behaves like a dict but with typing"""
     def __init__(self):
         super().__init__({
-            "user": {"name": None},
+            "user": {
+                "name": None,
+                "email": None,  # Add email field
+                "id": None      # Add user ID for unique identification
+            },
             "todos": [],
             "current_step": "initialize_agent",
             "messages": [],
-            "skills_used": []
+            "skills_used": [],
+            "entity_memory": {},  # Store entity memory
+            "conversation_memory": {},  # Store conversation memory
+            "user_memory": {}  # Store user-specific memory
         })
 
 # Mock Language Model for testing
@@ -227,6 +236,50 @@ Your first message should ask for the user's name if you don't know it yet."""
         "current_step": "process_input"
     }
 
+def save_memory(state: AgentState, user_key: str):
+    """Save user memory to a JSON file"""
+    try:
+        # Create memory directory if it doesn't exist
+        memory_dir = Path("memory")
+        memory_dir.mkdir(exist_ok=True)
+        
+        # Create user-specific memory file
+        memory_file = memory_dir / f"{user_key}_memory.json"
+        
+        # Prepare memory data
+        memory_data = {
+            "user_memory": state["user_memory"].get(user_key, {}),
+            "entity_memory": state["entity_memory"].get(f"user_{user_key}", {}),
+            "conversation_memory": state["conversation_memory"].get(user_key, {}),
+            "last_updated": time.time()
+        }
+        
+        # Save to file
+        with open(memory_file, 'w') as f:
+            json.dump(memory_data, f, indent=2)
+        
+        print(f"💾 Saved memory for user {user_key}")
+    except Exception as e:
+        print(f"❌ Error saving memory: {str(e)}")
+
+def load_memory(user_key: str) -> dict:
+    """Load user memory from JSON file"""
+    try:
+        memory_file = Path("memory") / f"{user_key}_memory.json"
+        
+        if not memory_file.exists():
+            print(f"📝 No existing memory found for user {user_key}")
+            return {}
+        
+        with open(memory_file, 'r') as f:
+            memory_data = json.load(f)
+        
+        print(f"📖 Loaded memory for user {user_key}")
+        return memory_data
+    except Exception as e:
+        print(f"❌ Error loading memory: {str(e)}")
+        return {}
+
 def process_input(state: AgentState):
     """Process user input and generate a response using the language model"""
     print("🏁 Entering process_input function")
@@ -248,6 +301,34 @@ def process_input(state: AgentState):
     
     print(f"👤 Last human message: {last_human_message.content[:100]}...")
     
+    # Get user identifier (email or ID)
+    user_email = state["user"].get("email")
+    user_id = state["user"].get("id")
+    user_key = user_email or user_id or "anonymous"
+    
+    # Load existing memory for user
+    memory_data = load_memory(user_key)
+    
+    # Initialize user-specific memory if not exists
+    if user_key not in state["user_memory"]:
+        state["user_memory"][user_key] = memory_data.get("user_memory", {
+            "name": None,
+            "preferences": {},
+            "last_interaction": time.time(),
+            "conversation_history": []
+        })
+    
+    # Initialize entity memory if not exists
+    if f"user_{user_key}" not in state["entity_memory"]:
+        state["entity_memory"][f"user_{user_key}"] = memory_data.get("entity_memory", {})
+    
+    # Initialize conversation memory if not exists
+    if user_key not in state["conversation_memory"]:
+        state["conversation_memory"][user_key] = memory_data.get("conversation_memory", {
+            "messages": [],
+            "last_updated": time.time()
+        })
+    
     # Check if this is a name introduction
     is_name_introduction = False
     if len(messages) >= 2:
@@ -265,22 +346,55 @@ def process_input(state: AgentState):
     # Process name introduction if detected
     if is_name_introduction:
         # Extract name
-        name_parts = last_human_message.content.split("my name is ")
-        if len(name_parts) > 1:
-            name = name_parts[1].strip()
+        content = last_human_message.content.lower()
+        if "my name is" in content:
+            name = content.split("my name is")[1].strip()
         else:
             name = last_human_message.content.strip()
         
-        # Update user name in state
+        # Update user name in all memory locations
         state["user"]["name"] = name
+        
+        # Update entity memory
+        state["entity_memory"][f"user_{user_key}"] = {
+            "name": name,
+            "last_updated": time.time(),
+            "source": "direct_introduction",
+            "email": user_email,
+            "id": user_id
+        }
+        
+        # Update user-specific memory
+        state["user_memory"][user_key]["name"] = name
+        state["user_memory"][user_key]["last_interaction"] = time.time()
+        
         print(f"📊 Updated user name to: {name}")
+        print(f"💾 Stored user information in memory for user: {user_key}")
     
     # Determine if we're in mocked mode
     is_mocked = os.environ.get("MOCK_MODE", "False").lower() == "true"
     print(f"⚙️ process_input: Mocked mode = {is_mocked}")
     
-    # Get user name if available
-    user_name = state["user"].get("name", "")
+    # Get user information from memory
+    user_info = state["user_memory"][user_key]
+    user_name = user_info.get("name") or state["user"].get("name", "")
+    
+    # Update conversation memory
+    if "conversation_memory" not in state:
+        state["conversation_memory"] = {}
+    
+    if user_key not in state["conversation_memory"]:
+        state["conversation_memory"][user_key] = {
+            "messages": [],
+            "last_updated": time.time()
+        }
+    
+    # Add current message to conversation memory
+    state["conversation_memory"][user_key]["messages"].append({
+        "content": last_human_message.content,
+        "timestamp": time.time(),
+        "type": "human"
+    })
     
     # Prepare system prompt for model
     system_prompt = f"""You are 007, a personal productivity agent.
@@ -307,6 +421,15 @@ If the user asks about tasks, offer to create a task for them."""
         
         print(f"✅ Response generated in {end_time - start_time:.2f}s")
         print(f"💬 Response content: {response.content[:100]}...")
+        
+        # Add response to conversation memory
+        state["conversation_memory"][user_key]["messages"].append({
+            "content": response.content,
+            "timestamp": time.time(),
+            "type": "ai"
+        })
+        state["conversation_memory"][user_key]["last_updated"] = time.time()
+        
     except Exception as e:
         print(f"❌ Error calling model: {str(e)}")
         response = AIMessage(content="I understand. Is there anything specific you'd like help with today?")
@@ -319,6 +442,9 @@ If the user asks about tasks, offer to create a task for them."""
     if last_human_message and "task" in last_human_message.content.lower():
         if "task_management" not in skills_used:
             skills_used.append("task_management")
+    
+    # Save memory after processing
+    save_memory(state, user_key)
     
     # Update the state with new messages and other changes
     return {
