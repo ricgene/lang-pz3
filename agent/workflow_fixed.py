@@ -6,6 +6,7 @@ from datetime import datetime
 from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage, AIMessage
 from langgraph.graph import add_messages
 from functools import lru_cache
+import json
 
 # Safe environment variable handling
 try:
@@ -54,13 +55,17 @@ def validate_input(state: WorkflowState) -> Dict:
     return {"current_step": "initialize", **validated_state}
 
 def initialize_workflow(state: WorkflowState) -> Dict:
-    """Initialize the workflow with a greeting"""
+    """Initialize the workflow with a greeting."""
     print("\nInitializing workflow...")
     system_prompt = """You are a professional project coordinator helping customers with home improvement projects.
 You're currently helping with a kitchen faucet installation project.
 The vendor is Dave's Plumbing."""
 
-    greeting = "Hello! I'm your project coordinator. I'll help you with your kitchen faucet installation. What's your name?"
+    # If we have a saved name, ask about contractor meeting
+    if state["customer"]["name"]:
+        greeting = f"Hello {state['customer']['name']}! Have you had a chance to meet with Dave's Plumbing yet?"
+    else:
+        greeting = "Hello! I'm your project coordinator. I'll help you with your kitchen faucet installation. What's your name?"
     
     messages = [
         SystemMessage(content=system_prompt),
@@ -70,7 +75,7 @@ The vendor is Dave's Plumbing."""
     print("Initialization complete. Moving to process_name step...")
     return {
         "messages": messages,
-        "current_step": "process_name"
+        "current_step": "process_name" if not state["customer"]["name"] else "check_contractor_meeting"
     }
 
 def process_name(state: WorkflowState) -> Dict:
@@ -84,6 +89,9 @@ def process_name(state: WorkflowState) -> Dict:
     
     name = last_message.content.strip()
     
+    # Store the name in the customer dictionary
+    state["customer"]["name"] = name
+    
     # Add assistant's response acknowledging the name
     response = f"Thank you, {name}! I'll help you with your kitchen faucet installation. "
     response += "Would you like me to schedule an appointment with Dave's Plumbing for the installation?"
@@ -93,7 +101,8 @@ def process_name(state: WorkflowState) -> Dict:
     # Move to human_step to get their response about scheduling
     return {
         "current_step": "human_step",
-        "messages": state["messages"]
+        "messages": state["messages"],
+        "customer": state["customer"]  # Return updated customer info
     }
 
 def process_schedule(state: WorkflowState) -> Dict:
@@ -309,6 +318,28 @@ def human_step(state: WorkflowState) -> Dict:
     # Default to process_name for other cases
     return {"current_step": "process_name", "messages": state["messages"]}
 
+def check_contractor_meeting(state: WorkflowState) -> Dict:
+    """Check if the customer has met with the contractor."""
+    if not state.get("messages"):
+        return {"current_step": "initialize"}
+    
+    last_message = state["messages"][-1]
+    if not isinstance(last_message, HumanMessage):
+        return {"current_step": "human_step"}
+    
+    response = last_message.content.strip().lower()
+    
+    # Add appropriate response based on their answer
+    if "yes" in response or "yeah" in response:
+        state["messages"].append(AIMessage(content="Great! I'm glad the meeting went well. Is there anything else you need help with?"))
+    else:
+        state["messages"].append(AIMessage(content="No problem! Dave's Plumbing will contact you to schedule a meeting. Is there anything else you need help with?"))
+    
+    return {
+        "current_step": "confirm_end",
+        "messages": state["messages"]
+    }
+
 def create_workflow():
     """Create the workflow graph"""
     workflow = StateGraph(WorkflowState)
@@ -324,12 +355,14 @@ def create_workflow():
     workflow.add_node("reschedule", reschedule)
     workflow.add_node("process_notes", process_notes)
     workflow.add_node("human_step", human_step)
+    workflow.add_node("check_contractor_meeting", check_contractor_meeting)
     
     # Add edges with proper flow control
     workflow.set_entry_point("validate")
     workflow.add_edge("validate", "initialize")
     workflow.add_edge("initialize", "human_step")
     workflow.add_edge("human_step", "process_name")
+    workflow.add_edge("human_step", "check_contractor_meeting")
     workflow.add_edge("process_name", "process_schedule")
     workflow.add_edge("process_schedule", "confirm_end")
     workflow.add_edge("confirm_end", "process_additional")
@@ -341,16 +374,34 @@ def create_workflow():
     workflow.add_edge("reschedule", END)
     workflow.add_edge("process_notes", "end")
     workflow.add_edge("end", END)
+    workflow.add_edge("check_contractor_meeting", "confirm_end")
     
     return workflow.compile()
+
+def save_customer_name(name: str, filename: str = "customer.json") -> None:
+    """Save the customer name to a JSON file."""
+    with open(filename, "w") as f:
+        json.dump({"name": name}, f, indent=2)
+
+def load_customer_name(filename: str = "customer.json") -> str:
+    """Load customer name from a JSON file."""
+    if not os.path.exists(filename):
+        return None
+    
+    with open(filename, "r") as f:
+        data = json.load(f)
+        return data.get("name")
 
 def main():
     """Run the workflow."""
     print("\nStarting workflow...")
     
+    # Try to load existing customer name
+    saved_name = load_customer_name()
+    
     # Initialize state
     state = {
-        "customer": {"name": None},
+        "customer": {"name": saved_name},
         "task": {
             "description": "Kitchen faucet installation",
             "schedule": None
@@ -375,7 +426,8 @@ def main():
         "analyze_sentiment": analyze_sentiment,
         "reschedule": reschedule,
         "process_notes": process_notes,
-        "human_step": human_step
+        "human_step": human_step,
+        "check_contractor_meeting": check_contractor_meeting
     }
     
     current_step = "validate"
@@ -413,6 +465,11 @@ def main():
             
             # Print current messages for debugging
             print(f"\nCurrent messages: {[msg.content for msg in state['messages']]}")
+            
+            # Save customer name if it's been updated
+            if state["customer"]["name"] != saved_name:
+                save_customer_name(state["customer"]["name"])
+                saved_name = state["customer"]["name"]
             
         except Exception as e:
             print(f"Error in step '{current_step}': {str(e)}")
