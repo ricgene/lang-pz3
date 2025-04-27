@@ -15,6 +15,10 @@ import sys
 try:
     from langchain_openai import ChatOpenAI
     import openai
+    from dotenv import load_dotenv
+    load_dotenv()  # Load environment variables
+    print("Environment variables loaded")
+    print(f"OPENAI_API_KEY present: {'Yes' if os.getenv('OPENAI_API_KEY') else 'No'}")
 except ImportError:
     print("Warning: langchain_openai or openai not available")
 
@@ -80,17 +84,15 @@ def generate_greeting(state: AgentState):
     
     # Construct the greeting message
     if user_name:
-        greeting = f"Hello {user_name}! I'm 007, your personal productivity agent. How can I help you today?"
+        greeting = f"Hello {user_name}! I'm 007, your personal productivity agent. How can I help you with your kitchen faucet installation today?"
     else:
         greeting = "Hello! I'm 007, your personal productivity agent. I don't think we've met before. What's your name?"
     
     # Add the greeting as a system message
     system_prompt = """You are 007, a personal productivity agent.
-You help users manage their tasks, find information, and boost their productivity.
-You initially have some limitations, but those will improve soon.
-Your current skills:
-1. Remember and manage to-do items
-2. Call external services to shop for what the user wants and provide information"""
+You help users manage their projects and connect with vendors.
+For this conversation, we're focusing on a kitchen faucet installation project.
+The vendor is Dave's Plumbing."""
     
     # Add the messages
     messages = [
@@ -121,210 +123,77 @@ def process_input(state: AgentState):
             "current_step": "general_question"
         }
     
-    # Check if we've already processed this exact input to avoid loops
-    message_content = latest_message.content
-    if "processed_inputs" in state and message_content in state["processed_inputs"]:
-        return {
-            "messages": [AIMessage(content="I seem to be caught in a loop. Let's move on. How can I help you with something else?")],
-            "current_step": "general_question"
-        }
-    
-    # Add to processed inputs
-    processed_inputs = state.get("processed_inputs", [])
-    processed_inputs.append(message_content)
-    
     # If we're still in the introduction phase and don't know the user's name
     if state["user"].get("name") is None:
         # Extract name from message
-        name = message_content.strip()
+        name = latest_message.content.strip()
         if len(name) > 0:
-            # Update user info
+            # Update user info and propose contacting vendor
             return {
                 "user": {"name": name},
-                "messages": [AIMessage(content=f"Nice to meet you, {name}! How can I help you today?")],
-                "processed_inputs": processed_inputs,
-                "current_step": "general_question"  # Changed to avoid recursion
+                "messages": [AIMessage(content=f"Nice to meet you, {name}! For your kitchen faucet installation, we have an excellent vendor, Dave's Plumbing. Would you like to contact them tomorrow?")],
+                "current_step": "process_input"
             }
     
-    # Otherwise, determine what the user wants with API intent detection
+    # Otherwise, analyze sentiment about contacting the vendor
     model = _get_model("openai")
     if not model:
-        # Fallback if model not available
         return {
             "messages": [AIMessage(content="I'm sorry, but I'm having trouble processing your request right now. Please try again later.")],
-            "processed_inputs": processed_inputs,
             "current_step": "end_session"
         }
     
-    # Analyze user intent with API
-    system_prompt = """You are analyzing user input to determine their intent.
+    # Analyze sentiment
+    system_prompt = """Analyze the user's response to determine if they want to contact Dave's Plumbing.
 Categories:
-- add_todo: User wants to add a task to their todo list
-- view_todos: User wants to see their todo list
-- general_question: User has a general question
-- end_conversation: User wants to end the conversation
+- positive: User agrees to contact the vendor
+- negative: User does not want to contact the vendor
+- unknown: Cannot determine user's preference
 
 Format your response as a JSON object with two fields:
-- "intent": One of the categories above
-- "details": Additional details extracted from the message
+- "sentiment": One of the categories above
+- "reason": Brief explanation of the sentiment
 
 Example:
-{"intent": "add_todo", "details": "Buy milk tomorrow"}"""
+{"sentiment": "positive", "reason": "User agreed to contact vendor"}"""
     
-    # Get user intent with fixed approach
     try:
-        messages_for_intent = [
+        messages_for_sentiment = [
             SystemMessage(content=system_prompt),
-            HumanMessage(content=message_content)
+            HumanMessage(content=latest_message.content)
         ]
-        intent_response = model.invoke(messages_for_intent)
+        sentiment_response = model.invoke(messages_for_sentiment)
         
-        # Try to parse the intent from the model response
         try:
-            intent_data = json.loads(intent_response.content)
-            intent = intent_data.get("intent", "general_question")
-            details = intent_data.get("details", "")
+            sentiment_data = json.loads(sentiment_response.content)
+            sentiment = sentiment_data.get("sentiment", "unknown")
+            
+            if sentiment == "positive":
+                return {
+                    "current_step": "end_conversation",
+                    "messages": [AIMessage(content=f"Thank you {state['user']['name']}, have a great day!")]
+                }
+            else:  # For both negative and unknown
+                return {
+                    "current_step": "end_conversation",
+                    "messages": [AIMessage(content=f"I understand, {state['user']['name']}. Would you like me to contact Dave's Plumbing for you instead?")]
+                }
         except json.JSONDecodeError:
-            # Fallback intent detection with keywords if JSON parsing fails
-            intent = "general_question"  # Default
-            lower_content = message_content.lower()
-            
-            if "add" in lower_content and ("todo" in lower_content or "task" in lower_content):
-                intent = "add_todo"
-            elif "show" in lower_content and ("todo" in lower_content or "task" in lower_content):
-                intent = "view_todos"
-            elif "list" in lower_content and ("todo" in lower_content or "task" in lower_content):
-                intent = "view_todos"
-            elif "bye" in lower_content or "exit" in lower_content or "quit" in lower_content:
-                intent = "end_conversation"
-            
-            details = ""
-        
-        # Add the intent to skills used
-        skills_used = state["skills_used"] 
-        if intent not in skills_used:
-            skills_used.append(intent)
-        
-        # Route to appropriate action
-        return {
-            "skills_used": skills_used,
-            "processed_inputs": processed_inputs,
-            "current_step": intent
-        }
+            return {
+                "current_step": "end_conversation",
+                "messages": [AIMessage(content=f"I understand, {state['user']['name']}. Would you like me to contact Dave's Plumbing for you instead?")]
+            }
     except Exception as e:
-        print(f"Error in intent detection: {str(e)}")
-        # Fallback to general question
+        print(f"Error in sentiment analysis: {str(e)}")
         return {
-            "processed_inputs": processed_inputs,
-            "current_step": "general_question"
-        }
-
-@traceable(project_name="007-productivity-agent")
-def add_todo(state: AgentState):
-    """Add a task to the todo list"""
-    
-    latest_message = state["messages"][-1].content
-    
-    # Extract task from the message - remove "add" and "todo" keywords
-    task = latest_message
-    lower_task = task.lower()
-    
-    # Simple task extraction
-    if ":" in task:
-        task = task.split(":", 1)[1].strip()
-    elif "add" in lower_task and "task" in lower_task:
-        task = task.lower().replace("add", "", 1)
-        task = task.replace("task", "", 1)
-        task = task.strip()
-    elif "add" in lower_task and "todo" in lower_task:
-        task = task.lower().replace("add", "", 1)
-        task = task.replace("todo", "", 1)
-        task = task.strip()
-    
-    # Add to todos
-    todos = state["todos"]
-    todos.append({"task": task, "created_at": datetime.now().isoformat()})
-    
-    return {
-        "todos": todos,
-        "messages": [AIMessage(content=f"I've added \"{task}\" to your todo list. Is there anything else you'd like me to do?")],
-        "current_step": "general_question"  # Changed to avoid recursion
-    }
-
-@traceable(project_name="007-productivity-agent")
-def view_todos(state: AgentState):
-    """Show the todo list"""
-    
-    todos = state["todos"]
-    
-    if not todos:
-        response = "You don't have any tasks in your todo list yet. Would you like to add one?"
-    else:
-        response = "Here's your current todo list:\n"
-        for i, todo in enumerate(todos, 1):
-            response += f"{i}. {todo['task']}\n"
-        response += "\nIs there anything else you'd like me to do?"
-    
-    return {
-        "messages": [AIMessage(content=response)],
-        "current_step": "general_question"  # Changed to avoid recursion
-    }
-
-@traceable(project_name="007-productivity-agent")
-def general_question(state: AgentState):
-    """Handle general questions"""
-    
-    # If no messages, return generic response
-    if not state["messages"] or len(state["messages"]) == 0:
-        return {
-            "messages": [AIMessage(content="How can I help you today?")],
-            "current_step": "process_input"
-        }
-    
-    # Get the latest message
-    latest_message = state["messages"][-1]
-    
-    # Use the model to generate a response
-    model = _get_model("openai")
-    if not model:
-        return {
-            "messages": [AIMessage(content="I'm sorry, but I'm having trouble answering your question right now. Please try again later.")],
-            "current_step": "process_input"
-        }
-    
-    # Generate response - only use the relevant context
-    # To prevent large context windows, only use the last few messages
-    relevant_messages = state["messages"][-5:]  # Get last 5 messages max
-    
-    try:
-        response = model.invoke(relevant_messages)
-        return {
-            "messages": [response],
-            "current_step": "process_input"
-        }
-    except Exception as e:
-        print(f"Error generating response: {str(e)}")
-        # Fallback response
-        return {
-            "messages": [AIMessage(content="I'm here to help you stay productive. Would you like to add a task to your todo list or see your current tasks?")],
-            "current_step": "process_input"
+            "current_step": "end_conversation",
+            "messages": [AIMessage(content=f"I apologize {state['user']['name']}, but I'm having trouble understanding. Would you like me to contact Dave's Plumbing for you instead?")]
         }
 
 @traceable(project_name="007-productivity-agent")
 def end_conversation(state: AgentState):
     """End the conversation"""
-    
-    # Create a summary of what was accomplished
-    tasks_added = len(state["todos"])
-    skills_used = state["skills_used"]
-    
-    farewell = f"It was great helping you today! "
-    if tasks_added > 0:
-        farewell += f"I've added {tasks_added} tasks to your todo list. "
-    farewell += "Feel free to come back anytime you need assistance with your productivity."
-    
     return {
-        "messages": [AIMessage(content=farewell)],
         "current_step": END
     }
 
@@ -346,9 +215,6 @@ def create_agent_graph():
     workflow.add_node("initialize_agent", initialize_agent)
     workflow.add_node("generate_greeting", generate_greeting)
     workflow.add_node("process_input", process_input)
-    workflow.add_node("add_todo", add_todo)
-    workflow.add_node("view_todos", view_todos)
-    workflow.add_node("general_question", general_question)
     workflow.add_node("end_conversation", end_conversation)
     workflow.add_node("end_session", end_session)
     
@@ -356,23 +222,9 @@ def create_agent_graph():
     workflow.add_edge("validate_input", "initialize_agent")
     workflow.add_edge("initialize_agent", "generate_greeting")
     workflow.add_edge("generate_greeting", "process_input")
-    
-    # From process_input, go to specific handlers
-    workflow.add_conditional_edges(
-        "process_input",
-        lambda state: state["current_step"],
-        {
-            "add_todo": "add_todo",
-            "view_todos": "view_todos", 
-            "general_question": "general_question",
-            "end_conversation": "end_conversation",
-            "end_session": "end_session"
-        }
-    )
-    
-    # Changed: set general_question to go to process_input
-    # But add_todo and view_todos will go to general_question to avoid recursion
-    workflow.add_edge("general_question", "process_input")
+    workflow.add_edge("process_input", "process_input")  # Allow multiple turns
+    workflow.add_edge("end_conversation", END)
+    workflow.add_edge("end_session", END)
     
     # Set entry point
     workflow.set_entry_point("validate_input")
@@ -380,13 +232,13 @@ def create_agent_graph():
     return workflow
 
 # Create the compiled application
-app = create_agent_graph().compile()
+app = create_agent_graph().compile(recursion_limit=5)
 
 # Main function for local testing
 def main():
     """Run the agent workflow for local testing"""
     
-    workflow = create_agent_graph().compile()
+    workflow = create_agent_graph().compile(recursion_limit=5)
     
     # Initial empty state
     state = {"messages": []}

@@ -8,36 +8,91 @@ more claude project directions:
 
 A LangGraph workflow for connecting customers with vendors based on sentiment analysis.
 
+## Environment Setup
+
+This project requires Python 3.11 and uses a virtual environment for dependency management.
+
+```bash
+# Create and activate the Python 3.11 virtual environment
+python3.11 -m venv .venv_py311
+source .venv_py311/bin/activate
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
+## Project Structure
+
+### Latest Workflow
+- `workflow_fixed.py` - The current, recommended workflow implementation that combines the best features from previous versions
+  - Improved state management
+  - Better error handling
+  - Simplified sentiment analysis
+  - Enhanced conversation flow
+
+### Deprecated Files (For Reference)
+- `workflow2.py` - Original workflow implementation
+  - Useful for understanding the initial architecture
+  - Contains basic sentiment analysis
+  - Will be deprecated in favor of workflow_fixed.py
+
+- `workflowbond7.py` - Intermediate workflow version
+  - Introduced improved state management
+  - Added more robust error handling
+  - Will be deprecated in favor of workflow_fixed.py
+
 ## Features
 
 - Customer and vendor management
 - Task processing
 - Sentiment analysis
 - Conversation tracking
+- State management
+- Error handling
+
+## Running the Workflow
+
+### Local Development
+```bash
+# Activate the virtual environment
+source .venv_py311/bin/activate
+
+# Run the latest workflow
+python agent/workflow_fixed.py
+```
+
+### LangSmith Studio
+```bash
+# Start LangSmith Studio locally
+langgraph dev
+
+# Access Studio at: https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024
+```
+
+## Environment Variables
+
+See `.env-example` for required environment variables.
 
 ## Deployment
 
 This project is designed to be deployed to LangSmith.
 
-.....
+### Cloud Deployment
+- Deployment URL: https://smith.langchain.com/o/fa54f251-75d3-4005-8788-376a48b2c6c0/host/deployments
+- Repository: https://github.com/ricgene/lang-pz3
 
+## Testing
 
-# see .env-example
+- `test_langsmith.py` - Main test file for LangSmith integration
+- `test_memory.py` - Memory management tests
+- `test-bond7-agent.py` - Bond7 agent specific tests
 
-# Test locally from file
-cd ~/gitl/lang-pz3
-# python3.11 -m venv .venv_py311
-source .venv_py311/bin/activate
-# pip install -r requirements.txt
-python agent/007-workflow.py
+## Notes
 
-## poetry env use python3.11 && poetry run python agent/007-workflow.py
-
-
-# to run workflow2.py locally in studio
-poetry run langgraph dev
-# starts this: https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024
-# then paste input data from workflow2.py file into studio input.
+- The project uses pip and requirements.txt for dependency management
+- All development should be done in the Python 3.11 virtual environment
+- The latest workflow implementation is in `workflow_fixed.py`
+- Previous workflow versions are kept for reference but will be deprecated
 
 # incorporate query-trace-filter-out-scanned.py
 poetry run python query-langgraph.py
