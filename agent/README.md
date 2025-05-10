@@ -32,25 +32,66 @@ pip install -r requirements.txt
 cp .env-example .env
 ```
 
+## Testing
+
+### Development Mode (Mock Responses)
+```bash
+export MOCK_SENTIMENT_ANALYSIS=True
+pytest tests/test_workflow2_pytest.py -v -k "not test_llm"
+```
+
+### Production Mode (Real LLM)
+```bash
+export MOCK_SENTIMENT_ANALYSIS=False
+pytest tests/test_workflow2_pytest.py -v
+```
+
+### Interactive Testing
+```bash
+python tests/test_workflow2_local.py
+```
+
+## Cloud Deployment
+
+Deploy to LangSmith:
+1. Visit: https://smith.langchain.com/o/fa54f251-75d3-4005-8788-376a48b2c6c0/host/deployments
+2. Connect to repository: https://github.com/ricgene/lang-pz3
+
+## Local Studio Testing
+
+Run workflow locally in LangSmith studio:
+```bash
+langgraph dev
+```
+This starts: https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024
+
+## Query Testing
+```bash
+python tests/query-langgraph.py
+```
+
+## Environment Variables
+
+- `MOCK_USER_RESPONSES`: When True, automatically generates user responses
+- `MOCK_SENTIMENT_ANALYSIS`: When True, uses rule-based sentiment analysis instead of LLM
+- `OPENAI_API_KEY`: Required when `MOCK_SENTIMENT_ANALYSIS` is False
+
 ## Project Structure
 
-### Latest Workflow
-- `workflow_fixed.py` - The current, recommended workflow implementation that combines the best features from previous versions
-  - Improved state management
-  - Better error handling
-  - Simplified sentiment analysis
-  - Enhanced conversation flow
-
-### Deprecated Files (For Reference)
-- `workflow2.py` - Original workflow implementation
-  - Useful for understanding the initial architecture
-  - Contains basic sentiment analysis
-  - Will be deprecated in favor of workflow_fixed.py
-
-- `workflowbond7.py` - Intermediate workflow version
-  - Introduced improved state management
-  - Added more robust error handling
-  - Will be deprecated in favor of workflow_fixed.py
+```
+.
+├── agent/                 # Main workflow implementation
+│   ├── workflow2.py      # Current workflow implementation
+│   └── old/             # Deprecated workflow versions
+├── tests/                # All test files
+│   ├── test_workflow2_pytest.py    # Automated tests
+│   ├── test_workflow2_local.py     # Interactive testing
+│   ├── query-langgraph.py          # Query testing
+│   └── test-agent-local-studio-nostream.py  # Studio testing
+├── memory/               # Memory storage
+├── requirements.txt      # Dependencies
+└── .env-example         # Environment variables template
+```
 
 ## Features
 

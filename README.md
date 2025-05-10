@@ -23,18 +23,18 @@ cp .env-example .env
 ### Development Mode (Mock Responses)
 ```bash
 export MOCK_SENTIMENT_ANALYSIS=True
-pytest agent/test_workflow2_pytest.py -v -k "not test_llm"
+pytest tests/test_workflow2_pytest.py -v -k "not test_llm"
 ```
 
 ### Production Mode (Real LLM)
 ```bash
 export MOCK_SENTIMENT_ANALYSIS=False
-pytest agent/test_workflow2_pytest.py -v
+pytest tests/test_workflow2_pytest.py -v
 ```
 
 ### Interactive Testing
 ```bash
-python agent/test_workflow2_local.py
+python tests/test_workflow2_local.py
 ```
 
 ## Cloud Deployment
@@ -53,7 +53,7 @@ This starts: https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024
 
 ## Query Testing
 ```bash
-python query-langgraph.py
+python tests/query-langgraph.py
 ```
 
 ## Environment Variables
@@ -67,18 +67,35 @@ python query-langgraph.py
 1. Run mock tests during development:
 ```bash
 export MOCK_SENTIMENT_ANALYSIS=True
-pytest agent/test_workflow2_pytest.py -v -k "not test_llm"
+pytest tests/test_workflow2_pytest.py -v -k "not test_llm"
 ```
 
 2. Test specific scenarios interactively:
 ```bash
-python agent/test_workflow2_local.py
+python tests/test_workflow2_local.py
 ```
 
 3. Before deployment, run full test suite including LLM tests:
 ```bash
 export MOCK_SENTIMENT_ANALYSIS=False
-pytest agent/test_workflow2_pytest.py -v
+pytest tests/test_workflow2_pytest.py -v
+```
+
+## Project Structure
+
+```
+.
+├── agent/                 # Main workflow implementation
+│   ├── workflow2.py      # Current workflow implementation
+│   └── old/             # Deprecated workflow versions
+├── tests/                # All test files
+│   ├── test_workflow2_pytest.py    # Automated tests
+│   ├── test_workflow2_local.py     # Interactive testing
+│   ├── query-langgraph.py          # Query testing
+│   └── test-agent-local-studio-nostream.py  # Studio testing
+├── memory/               # Memory storage
+├── requirements.txt      # Dependencies
+└── .env-example         # Environment variables template
 ```
 
 # Test locally from file
