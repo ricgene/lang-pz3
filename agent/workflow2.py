@@ -190,11 +190,17 @@ def analyze_sentiment(state: WorkflowState):
             # Use rule-based analysis when mocking
             text = last_human_message.content.lower()
             
-            if any(word in text for word in ["yes", "thanks", "great", "perfect", "will do"]):
+            if any(word in text for word in ["yes", "thanks", "great", "perfect", "will do", "do it", "tomorrow", "later", "sure", "okay"]):
                 sentiment = "positive"
-                reason = ""
+                # Add reason based on the response
+                if "tomorrow" in text or "later" in text:
+                    reason = "customer will proceed at a later time"
+                elif "thanks" in text or "thank you" in text:
+                    reason = "customer expressed gratitude"
+                else:
+                    reason = "customer agreed to proceed"
                 print("Detected positive sentiment")
-            elif any(word in text for word in ["no", "can't", "won't", "concerned", "worried", "budget"]):
+            elif any(word in text for word in ["no", "can't", "won't", "concerned", "worried", "budget", "expensive", "cost"]):
                 sentiment = "negative"
                 
                 # Simple reason detection
