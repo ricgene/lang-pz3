@@ -15,13 +15,13 @@ pip install langgraph langchain-openai openai pytest
 OPENAI_API_KEY=your_api_key_here
 ```
 
-## Running Tests
+## Testing Options
 
-### Interactive Testing
+### 1. Interactive Testing
+
+Run the workflow interactively to test specific scenarios:
 
 #### With Real LLM (Production Mode)
-To run tests with the real OpenAI LLM:
-
 ```bash
 export MOCK_USER_RESPONSES=False
 export MOCK_SENTIMENT_ANALYSIS=False
@@ -29,58 +29,103 @@ python agent/test_workflow2_local.py
 ```
 
 #### With Mocking (Development Mode)
-To run tests with mock responses and rule-based sentiment analysis:
-
 ```bash
 export MOCK_USER_RESPONSES=True
 export MOCK_SENTIMENT_ANALYSIS=True
 python agent/test_workflow2_local.py
 ```
 
-### Automated Testing with pytest
+### 2. Automated Testing with pytest
 
-Run the full test suite:
+The test suite includes various test cases for sentiment analysis, workflow initialization, and error handling.
+
+#### Run All Tests
 ```bash
 pytest agent/test_workflow2_pytest.py -v
 ```
 
-Run only mock tests (no LLM calls):
+#### Run Only Mock Tests (No API Key Required)
 ```bash
 pytest agent/test_workflow2_pytest.py -v -k "not test_llm"
 ```
 
-Run only LLM tests:
+#### Run Only LLM Tests (Requires API Key)
 ```bash
 pytest agent/test_workflow2_pytest.py -v -k "test_llm"
 ```
 
-The test suite includes:
-- Workflow initialization tests
-- Mock sentiment analysis with various responses
-- LLM-based sentiment analysis (requires API key)
-- Full conversation flow tests
-- Error handling tests
+#### Test Coverage
+The test suite covers:
+- Workflow initialization
+- Sentiment analysis (both mock and LLM-based)
+  - Positive responses ("yes", "I'll do it tomorrow", etc.)
+  - Negative responses ("no", "I'm concerned about cost", etc.)
+  - Ambiguous responses ("maybe", "I'll think about it")
+- Full conversation flow
+- Error handling for invalid inputs
 
-## Test Interaction
+### 3. Test Cases
 
-1. The test will start a conversation simulation
-2. You can type responses to the prompts (or they will be auto-generated if mocking is enabled)
-3. Type 'quit' to end the conversation
+#### Positive Sentiment Examples
+- "yes"
+- "I'll do it tomorrow"
+- "sounds great"
+- "will do"
 
-## Expected Behavior
+#### Negative Sentiment Examples
+- "no"
+- "I can't right now"
+- "I'm concerned about the cost"
+- "the budget is too high"
 
-The workflow will:
-1. Initialize with test customer and vendor data
-2. Present an initial greeting
-3. Analyze sentiment of responses (using LLM or rules-based analysis)
-4. Generate appropriate follow-up messages
-5. Track conversation state and sentiment throughout
+#### Unknown Sentiment Examples
+- "maybe"
+- "I'll think about it"
+- "can you provide more information"
 
 ## Environment Variables
 
 - `MOCK_USER_RESPONSES`: When True, automatically generates user responses
 - `MOCK_SENTIMENT_ANALYSIS`: When True, uses rule-based sentiment analysis instead of LLM
 - `OPENAI_API_KEY`: Required when `MOCK_SENTIMENT_ANALYSIS` is False
+
+## Development Workflow
+
+1. Run mock tests during development:
+```bash
+export MOCK_SENTIMENT_ANALYSIS=True
+pytest agent/test_workflow2_pytest.py -v -k "not test_llm"
+```
+
+2. Test specific scenarios interactively:
+```bash
+python agent/test_workflow2_local.py
+```
+
+3. Before deployment, run full test suite including LLM tests:
+```bash
+export MOCK_SENTIMENT_ANALYSIS=False
+pytest agent/test_workflow2_pytest.py -v
+```
+
+## Cloud Deployment
+
+Deploy to LangSmith:
+1. Visit: https://smith.langchain.com/o/fa54f251-75d3-4005-8788-376a48b2c6c0/host/deployments
+2. Connect to repository: https://github.com/ricgene/gitl/lang-pz3
+
+## Local Studio Testing
+
+Run workflow locally in LangSmith studio:
+```bash
+poetry run langgraph dev
+```
+This starts: https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024
+
+## Query Testing
+```bash
+poetry run python query-langgraph.py
+```
 
 # Test locally from file
 cd ~/gitl/lang-pz3
