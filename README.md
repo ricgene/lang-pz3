@@ -7,7 +7,7 @@ This repository contains a workflow implementation for customer-vendor interacti
 1. Make sure you have Python installed
 2. Install the required packages:
 ```bash
-pip install langgraph langchain-openai openai
+pip install langgraph langchain-openai openai pytest
 ```
 
 3. Set up your environment variables in a `.env` file:
@@ -17,7 +17,9 @@ OPENAI_API_KEY=your_api_key_here
 
 ## Running Tests
 
-### With Real LLM (Production Mode)
+### Interactive Testing
+
+#### With Real LLM (Production Mode)
 To run tests with the real OpenAI LLM:
 
 ```bash
@@ -26,7 +28,7 @@ export MOCK_SENTIMENT_ANALYSIS=False
 python agent/test_workflow2_local.py
 ```
 
-### With Mocking (Development Mode)
+#### With Mocking (Development Mode)
 To run tests with mock responses and rule-based sentiment analysis:
 
 ```bash
@@ -34,6 +36,30 @@ export MOCK_USER_RESPONSES=True
 export MOCK_SENTIMENT_ANALYSIS=True
 python agent/test_workflow2_local.py
 ```
+
+### Automated Testing with pytest
+
+Run the full test suite:
+```bash
+pytest agent/test_workflow2_pytest.py -v
+```
+
+Run only mock tests (no LLM calls):
+```bash
+pytest agent/test_workflow2_pytest.py -v -k "not test_llm"
+```
+
+Run only LLM tests:
+```bash
+pytest agent/test_workflow2_pytest.py -v -k "test_llm"
+```
+
+The test suite includes:
+- Workflow initialization tests
+- Mock sentiment analysis with various responses
+- LLM-based sentiment analysis (requires API key)
+- Full conversation flow tests
+- Error handling tests
 
 ## Test Interaction
 
