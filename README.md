@@ -18,6 +18,13 @@ pip install -r requirements.txt
 cp .env-example .env
 ```
 
+## Documentation
+
+- [Memory Types](docs/README-langsmith-memory-types.md) - Detailed explanation of LangSmith memory types
+- [Memory Implementation Plan](docs/MemoryImplementationPlanForLangGraph.md) - Plan for implementing memory in LangGraph
+- [Test Agent Documentation](docs/read-me-test-agent.md) - Information about the test agent
+- [Example Files](docs/README-note-on-example-files.md) - Documentation for example files
+
 ## Testing
 
 ### Development Mode (Mock Responses)
@@ -93,6 +100,11 @@ pytest tests/test_workflow2_pytest.py -v
 │   ├── test_workflow2_local.py     # Interactive testing
 │   ├── query-langgraph.py          # Query testing
 │   └── test-agent-local-studio-nostream.py  # Studio testing
+├── docs/                 # Documentation
+│   ├── README-langsmith-memory-types.md
+│   ├── MemoryImplementationPlanForLangGraph.md
+│   ├── read-me-test-agent.md
+│   └── README-note-on-example-files.md
 ├── memory/               # Memory storage
 ├── requirements.txt      # Dependencies
 └── .env-example         # Environment variables template
