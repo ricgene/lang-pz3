@@ -1,5 +1,5 @@
 from typing import TypedDict, Dict, Any, List, Annotated
-from langgraph.graph import StateGraph, END
+from langgraph.graph import StateGraph, END, START
 import os
 from langsmith.run_helpers import traceable
 from datetime import datetime
@@ -24,6 +24,7 @@ class WorkflowState(TypedDict):
     current_step: Annotated[str, add_messages]  # For tracking workflow progress
     sentiment: str  # For tracking customer sentiment
     sentiment_attempts: int  # Track number of sentiment analysis attempts
+    human_input_received: bool  # Flag to prevent recursion
 
 @lru_cache(maxsize=1)
 def get_llm():
@@ -38,6 +39,8 @@ def validate_input(state: WorkflowState) -> Dict:
     """Validate and initialize the workflow state"""
     print("\nValidating input...")
     validated_state = state.copy()
+    
+    # Initialize all required state fields
     if "customer" not in validated_state:
         validated_state["customer"] = {"name": None}
     if "task" not in validated_state:
@@ -50,7 +53,17 @@ def validate_input(state: WorkflowState) -> Dict:
         validated_state["sentiment"] = "neutral"
     if "sentiment_attempts" not in validated_state:
         validated_state["sentiment_attempts"] = 0
-    
+    if "step_counts" not in validated_state:
+        validated_state["step_counts"] = {
+            "process_name": 0,
+            "analyze_sentiment": 0,
+            "confirm_end": 0,
+            "process_additional": 0,
+            "reschedule": 0
+        }
+    if "human_input_received" not in validated_state:
+        validated_state["human_input_received"] = False
+        
     print("Validation complete. Moving to initialize step...")
     return {"current_step": "initialize", **validated_state}
 
@@ -80,6 +93,24 @@ The vendor is Dave's Plumbing."""
 
 def process_name(state: WorkflowState) -> Dict:
     """Process the user's name and update the conversation flow."""
+    # Initialize step_counts if not present
+    if "step_counts" not in state:
+        state["step_counts"] = {
+            "process_name": 0,
+            "analyze_sentiment": 0,
+            "confirm_end": 0,
+            "process_additional": 0,
+            "reschedule": 0
+        }
+    
+    # Increment step counter
+    state["step_counts"]["process_name"] = state["step_counts"].get("process_name", 0) + 1
+    
+    # Check recursion limit
+    if state["step_counts"]["process_name"] > 5:
+        state["messages"].append(AIMessage(content="I apologize, but I'm having trouble understanding. Please contact support for assistance."))
+        return {"current_step": END}
+    
     if not state.get("messages"):
         return {"current_step": "initialize"}
     
@@ -89,21 +120,18 @@ def process_name(state: WorkflowState) -> Dict:
     
     name = last_message.content.strip()
     
+    # If name is empty, ask again
+    if not name:
+        state["messages"].append(AIMessage(content="I didn't catch your name. Could you please tell me your name?"))
+        return {"current_step": "human_step"}
+    
     # Store the name in the customer dictionary
     state["customer"]["name"] = name
     
     # Add assistant's response acknowledging the name
-    response = f"Thank you, {name}! I'll help you with your kitchen faucet installation. "
-    response += "Would you like me to schedule an appointment with Dave's Plumbing for the installation?"
+    state["messages"].append(AIMessage(content=f"Thanks {name}! Would you like to schedule the kitchen faucet installation with Dave's Plumbing?"))
     
-    state["messages"].append(AIMessage(content=response))
-    
-    # Move to human_step to get their response about scheduling
-    return {
-        "current_step": "human_step",
-        "messages": state["messages"],
-        "customer": state["customer"]  # Return updated customer info
-    }
+    return {"current_step": "analyze_sentiment"}
 
 def process_schedule(state: WorkflowState) -> Dict:
     """Process the user's scheduling response."""
@@ -124,46 +152,77 @@ def process_schedule(state: WorkflowState) -> Dict:
         "messages": state["messages"]
     }
 
-def confirm_end(state: WorkflowState) -> WorkflowState:
-    """Confirm if the user needs anything else."""
-    print("\nConfirming end...")
+def confirm_end(state: WorkflowState) -> Dict:
+    """Confirm if the user wants to end the conversation"""
+    # Initialize step_counts if not present
+    if "step_counts" not in state:
+        state["step_counts"] = {
+            "process_name": 0,
+            "analyze_sentiment": 0,
+            "confirm_end": 0,
+            "process_additional": 0,
+            "reschedule": 0
+        }
     
-    # Get the last human message
-    human_messages = [msg for msg in state["messages"] if isinstance(msg, HumanMessage)]
-    if not human_messages:
-        print("No human message found, returning to confirm_end")
-        return {"current_step": "confirm_end"}
+    # Increment step counter
+    state["step_counts"]["confirm_end"] = state["step_counts"].get("confirm_end", 0) + 1
     
-    last_message = human_messages[-1].content.strip().lower()
+    # Check recursion limit
+    if state["step_counts"]["confirm_end"] > 5:
+        state["messages"].append(AIMessage(content="I apologize, but I'm having trouble understanding. Please contact support for assistance."))
+        return {"current_step": END}
     
-    if "yes" in last_message or "yeah" in last_message:
-        state["messages"].append(
-            AIMessage(content="What else can I help you with regarding your kitchen faucet installation?")
-        )
+    if not state.get("messages"):
+        return {"current_step": "process_name"}
+    
+    last_message = state["messages"][-1]
+    if not isinstance(last_message, HumanMessage):
+        return {"current_step": "human_step"}
+    
+    content = last_message.content.lower().strip()
+    
+    # If empty message or goodbye, end conversation
+    if not content or any(word in content for word in ["bye", "goodbye", "end", "done", "finished", "no"]):
+        state["messages"].append(AIMessage(content="Thank you for your time! Have a great day!"))
+        return {"current_step": END}
+    
+    # If there's a question mark, process additional questions
+    if "?" in content:
         return {"current_step": "process_additional"}
     
-    state["messages"].append(
-        AIMessage(content=f"Great! {state['vendor']['name']} will be in touch soon. Have a wonderful day!")
-    )
-    return {"current_step": "__end__"}
+    # For any other response, ask if they have questions
+    state["messages"].append(AIMessage(content="Is there anything specific you'd like to know about the installation?"))
+    return {"current_step": "human_step"}
 
-def process_additional(state: WorkflowState) -> WorkflowState:
-    """Process any additional requests."""
-    print("\nProcessing additional request...")
+def process_additional(state: WorkflowState) -> Dict:
+    """Process additional questions or requests"""
+    # Initialize step_counts if not present
+    if "step_counts" not in state:
+        state["step_counts"] = {
+            "process_name": 0,
+            "analyze_sentiment": 0,
+            "confirm_end": 0,
+            "process_additional": 0,
+            "reschedule": 0
+        }
     
-    # Get the last human message
-    human_messages = [msg for msg in state["messages"] if isinstance(msg, HumanMessage)]
-    if not human_messages:
-        print("No human message found, returning to process_additional")
-        return {"current_step": "process_additional"}
+    # Increment step counter
+    state["step_counts"]["process_additional"] = state["step_counts"].get("process_additional", 0) + 1
     
-    last_message = human_messages[-1].content.strip()
+    # Check recursion limit
+    if state["step_counts"]["process_additional"] > 5:
+        state["messages"].append(AIMessage(content="I apologize, but I'm having trouble understanding. Please contact support for assistance."))
+        return {"current_step": END}
     
-    # Add response and end conversation
-    state["messages"].append(
-        AIMessage(content=f"I'll make sure to pass this information to {state['vendor']['name']}. "
-                         "They will address this when they contact you. Is there anything else?")
-    )
+    if not state.get("messages"):
+        return {"current_step": "process_name"}
+    
+    last_message = state["messages"][-1]
+    if not isinstance(last_message, HumanMessage):
+        return {"current_step": "human_step"}
+    
+    # Add a generic response about contacting the plumber
+    state["messages"].append(AIMessage(content="Dave's Plumbing will be able to provide detailed information about your specific requirements when they contact you. Is there anything else you'd like to know?"))
     
     return {"current_step": "confirm_end"}
 
@@ -171,108 +230,89 @@ def analyze_sentiment(state: WorkflowState) -> Dict:
     """Analyze customer sentiment about scheduling"""
     print("\nAnalyzing sentiment...")
     
-    # Check attempt limit
-    attempts = state.get("sentiment_attempts", 0)
-    if attempts >= 3:  # Limit to 3 attempts
-        print("Maximum sentiment analysis attempts reached")
-        return {
-            "sentiment": "unclear",
-            "messages": [AIMessage(content="I'll have Dave's Plumbing contact you to discuss the scheduling details directly. Have a great day!")],
-            "current_step": END
+    # Initialize step_counts if not present
+    if "step_counts" not in state:
+        state["step_counts"] = {
+            "process_name": 0,
+            "analyze_sentiment": 0,
+            "confirm_end": 0,
+            "process_additional": 0,
+            "reschedule": 0
         }
+    
+    # Increment step counter
+    state["step_counts"]["analyze_sentiment"] = state["step_counts"].get("analyze_sentiment", 0) + 1
+    
+    # Check recursion limit
+    if state["step_counts"]["analyze_sentiment"] > 5:
+        state["messages"].append(AIMessage(content="I apologize, but I'm having trouble understanding your response. Please contact support for assistance."))
+        return {"current_step": END}
     
     if not state.get("messages"):
         print("No messages found, returning to process_name")
         return {"current_step": "process_name"}
     
     # Find the last human message
-    last_human_message = None
-    for message in reversed(state["messages"]):
-        if isinstance(message, HumanMessage):
-            last_human_message = message
+    last_message = None
+    for msg in reversed(state["messages"]):
+        if isinstance(msg, HumanMessage):
+            last_message = msg
             break
     
-    if not last_human_message:
-        print("No human message found, returning to process_name")
-        return {"current_step": "process_name"}
+    if not last_message:
+        print("No human message found, returning to human_step")
+        return {"current_step": "human_step"}
     
-    llm = get_llm()
-    if not llm:
-        print("LLM not available")
-        return {
-            "messages": [AIMessage(content="I apologize, but I'm having trouble processing your request. Please try again later.")],
-            "current_step": END
-        }
+    content = last_message.content.lower()
     
-    # Simple sentiment analysis prompt
-    sentiment_prompt = [
-        SystemMessage(content="Analyze if the user agrees to schedule a consultation for tomorrow. Respond with only: POSITIVE, NEGATIVE, or UNCLEAR"),
-        HumanMessage(content=last_human_message.content)
-    ]
+    # Check for positive sentiment
+    if any(word in content for word in ["yes", "yeah", "sure", "okay", "definitely", "absolutely"]):
+        state["sentiment"] = "positive"
+        state["messages"].append(AIMessage(content="Great! I'll have Dave's Plumbing contact you to confirm the details. Is there anything else you'd like to know?"))
+        return {"current_step": "confirm_end"}
     
-    try:
-        print("Performing sentiment analysis...")
-        sentiment_response = llm.invoke(sentiment_prompt)
-        sentiment = sentiment_response.content.strip().upper()
-        print(f"Sentiment detected: {sentiment}")
-        
-        # Increment attempt counter
-        state["sentiment_attempts"] = attempts + 1
-        
-        if sentiment == "POSITIVE":
-            return {
-                "sentiment": "positive",
-                "sentiment_attempts": state["sentiment_attempts"],
-                "messages": [AIMessage(content=f"Great! I'll have Dave's Plumbing contact you to confirm the details. Have a great day!")],
-                "current_step": END
-            }
-        elif sentiment == "NEGATIVE":
-            return {
-                "sentiment": "negative",
-                "sentiment_attempts": state["sentiment_attempts"],
-                "messages": [AIMessage(content="I understand. When would be a better time for you?")],
-                "current_step": "reschedule"
-            }
-        else:
-            if attempts >= 2:  # On third attempt, end gracefully
-                return {
-                    "sentiment": "unclear",
-                    "sentiment_attempts": state["sentiment_attempts"],
-                    "messages": [AIMessage(content="I'll have Dave's Plumbing contact you to discuss the scheduling details directly. Have a great day!")],
-                    "current_step": END
-                }
-            return {
-                "sentiment": "unclear",
-                "sentiment_attempts": state["sentiment_attempts"],
-                "messages": [AIMessage(content="I'm not sure if that's a yes or no. Would you like me to schedule the consultation for tomorrow?")],
-                "current_step": "analyze_sentiment"
-            }
-    except Exception as e:
-        print(f"Error in sentiment analysis: {str(e)}")
-        return {
-            "sentiment_attempts": state["sentiment_attempts"],
-            "messages": [AIMessage(content="I'm having trouble understanding. Could you please answer with a simple yes or no?")],
-            "current_step": "analyze_sentiment"
-        }
+    # Check for negative sentiment
+    if any(word in content for word in ["no", "nope", "not", "don't", "cannot", "cant", "reschedule"]):
+        state["sentiment"] = "negative"
+        return {"current_step": "reschedule"}
+    
+    # Unclear sentiment
+    state["sentiment"] = "unclear"
+    state["messages"].append(AIMessage(content="I'm not sure if you want to schedule the installation. Could you please answer with a clear yes or no?"))
+    return {"current_step": "human_step"}
 
 def reschedule(state: WorkflowState) -> Dict:
     """Handle rescheduling requests"""
+    # Initialize step_counts if not present
+    if "step_counts" not in state:
+        state["step_counts"] = {
+            "process_name": 0,
+            "analyze_sentiment": 0,
+            "confirm_end": 0,
+            "process_additional": 0,
+            "reschedule": 0
+        }
+    
+    # Increment step counter
+    state["step_counts"]["reschedule"] = state["step_counts"].get("reschedule", 0) + 1
+    
+    # Check recursion limit
+    if state["step_counts"]["reschedule"] > 5:
+        state["messages"].append(AIMessage(content="I apologize, but I'm having trouble understanding. Please contact support for assistance."))
+        return {"current_step": END}
+    
     if not state.get("messages"):
-        return {"current_step": "initialize"}
+        return {"current_step": "process_name"}
     
     last_message = state["messages"][-1]
     if not isinstance(last_message, HumanMessage):
+        state["messages"].append(AIMessage(content="I understand you'd like to reschedule. When would be a better time for you?"))
         return {"current_step": "human_step"}
     
-    # After getting their preferred time, thank them and end
-    response = "Thank you for letting me know. I'll have Dave's Plumbing contact you to confirm the details. Have a great day!"
+    # Process the rescheduling request
+    state["messages"].append(AIMessage(content="I'll note your preferred time and have Dave's Plumbing contact you to confirm the new schedule. Is there anything else you'd like to know?"))
     
-    state["messages"].append(AIMessage(content=response))
-    
-    return {
-        "current_step": END,
-        "messages": state["messages"]
-    }
+    return {"current_step": "confirm_end"}
 
 def process_notes(state: WorkflowState) -> Dict:
     """Process any specific notes about the installation."""
@@ -298,25 +338,48 @@ def process_notes(state: WorkflowState) -> Dict:
     }
 
 def human_step(state: WorkflowState) -> Dict:
-    """Get input from human and update messages."""
-    human_input = input("Please enter your message (or press Enter to end): ")
+    """Process human input and determine next step"""
+    # Initialize step_counts if not present
+    if "step_counts" not in state:
+        state["step_counts"] = {
+            "process_name": 0,
+            "analyze_sentiment": 0,
+            "confirm_end": 0,
+            "process_additional": 0,
+            "reschedule": 0
+        }
     
-    if not human_input.strip():
-        return {"current_step": "__end__"}
+    # Check if we have a human message as the last message
+    if state.get("messages") and len(state["messages"]) > 0:
+        last_message = state["messages"][-1]
+        if isinstance(last_message, HumanMessage):
+            # We have received human input, so process it
+            state["human_input_received"] = True
+            content = last_message.content.lower()
+            
+            # Check for end conversation
+            if content in ["end", "bye", "goodbye", "exit", "quit"]:
+                state["messages"].append(AIMessage(content="Thank you for your time! Have a great day!"))
+                return {"current_step": END}
+            
+            # Check for reschedule
+            if "reschedule" in content:
+                return {"current_step": "reschedule"}
+            
+            # Check for additional questions
+            if "?" in content:
+                return {"current_step": "process_additional"}
+            
+            # If no name yet, go to process_name
+            if not state["customer"].get("name"):
+                return {"current_step": "process_name"}
+            
+            # Default to analyzing sentiment
+            return {"current_step": "analyze_sentiment"}
     
-    # Add the human message to current messages
-    state["messages"].append(HumanMessage(content=human_input))
-    
-    # If we're expecting a name, go to process_name
-    if state.get("current_step") == "initialize":
-        return {"current_step": "process_name", "messages": state["messages"]}
-    
-    # If we're in scheduling, go to process_schedule
-    if len(state["messages"]) > 1 and "schedule" in state["messages"][-2].content.lower():
-        return {"current_step": "process_schedule", "messages": state["messages"]}
-    
-    # Default to process_name for other cases
-    return {"current_step": "process_name", "messages": state["messages"]}
+    # No human input received, stay in this state
+    state["human_input_received"] = False
+    return {"current_step": END}
 
 def check_contractor_meeting(state: WorkflowState) -> Dict:
     """Check if the customer has met with the contractor."""
@@ -340,7 +403,7 @@ def check_contractor_meeting(state: WorkflowState) -> Dict:
         "messages": state["messages"]
     }
 
-def create_workflow():
+def create_workflow() -> StateGraph:
     """Create the workflow graph"""
     workflow = StateGraph(WorkflowState)
     
@@ -348,33 +411,64 @@ def create_workflow():
     workflow.add_node("validate", validate_input)
     workflow.add_node("initialize", initialize_workflow)
     workflow.add_node("process_name", process_name)
-    workflow.add_node("process_schedule", process_schedule)
+    workflow.add_node("analyze_sentiment", analyze_sentiment)
     workflow.add_node("confirm_end", confirm_end)
     workflow.add_node("process_additional", process_additional)
-    workflow.add_node("analyze_sentiment", analyze_sentiment)
-    workflow.add_node("reschedule", reschedule)
-    workflow.add_node("process_notes", process_notes)
     workflow.add_node("human_step", human_step)
-    workflow.add_node("check_contractor_meeting", check_contractor_meeting)
+    workflow.add_node("reschedule", reschedule)
     
-    # Add edges with proper flow control
-    workflow.set_entry_point("validate")
+    # Add edges with clear flow control
+    workflow.add_edge(START, "validate")
     workflow.add_edge("validate", "initialize")
     workflow.add_edge("initialize", "human_step")
-    workflow.add_edge("human_step", "process_name")
-    workflow.add_edge("human_step", "check_contractor_meeting")
-    workflow.add_edge("process_name", "process_schedule")
-    workflow.add_edge("process_schedule", "confirm_end")
-    workflow.add_edge("confirm_end", "process_additional")
+    
+    # From human_step, conditionally go to next step if human input is received
+    workflow.add_conditional_edges(
+        "human_step",
+        lambda state: state["current_step"],
+        {
+            "process_name": "process_name",
+            "analyze_sentiment": "analyze_sentiment",
+            "process_additional": "process_additional",
+            "reschedule": "reschedule",
+            END: END
+        }
+    )
+    
+    # From process_name, go to human_step
+    workflow.add_edge("process_name", "human_step")
+    
+    # From analyze_sentiment, conditionally go to next step
+    workflow.add_conditional_edges(
+        "analyze_sentiment",
+        lambda state: state["current_step"],
+        {
+            "confirm_end": "confirm_end",
+            "reschedule": "reschedule",
+            "human_step": "human_step",
+            END: END
+        }
+    )
+    
+    # From confirm_end, conditionally go to next step
+    workflow.add_conditional_edges(
+        "confirm_end",
+        lambda state: state["current_step"],
+        {
+            "process_additional": "process_additional",
+            "human_step": "human_step",
+            END: END
+        }
+    )
+    
+    # From process_additional, go to confirm_end
     workflow.add_edge("process_additional", "confirm_end")
-    workflow.add_edge("process_schedule", "analyze_sentiment")
-    workflow.add_edge("analyze_sentiment", "reschedule")
-    workflow.add_edge("analyze_sentiment", END)
-    workflow.add_edge("human_step", "reschedule")
-    workflow.add_edge("reschedule", END)
-    workflow.add_edge("process_notes", "end")
-    workflow.add_edge("end", END)
-    workflow.add_edge("check_contractor_meeting", "confirm_end")
+    
+    # From reschedule, go to confirm_end
+    workflow.add_edge("reschedule", "confirm_end")
+    
+    # Set recursion limit
+    workflow.recursion_limit = 5
     
     return workflow.compile()
 
@@ -412,7 +506,9 @@ def main():
         },
         "messages": [],
         "sentiment": "neutral",
-        "sentiment_attempts": 0
+        "sentiment_attempts": 0,
+        "step_counts": {},
+        "human_input_received": False
     }
     
     # Define the workflow graph
