@@ -12,13 +12,24 @@ A LangGraph workflow for connecting customers with vendors based on sentiment an
 
 This project requires Python 3.11 and uses a virtual environment for dependency management.
 
-```bash
-# Create and activate the Python 3.11 virtual environment
-python3.11 -m venv .venv_py311
-source .venv_py311/bin/activate
+# Agent Implementation
 
-# Install dependencies
+## Setup
+
+1. Create and activate virtual environment:
+```bash
+python -m venv .venv_py311
+source .venv_py311/bin/activate  # On Windows: .venv_py311\Scripts\activate
+```
+
+2. Install dependencies:
+```bash
 pip install -r requirements.txt
+```
+
+3. Copy `.env-example` to `.env` and add your API keys:
+```bash
+cp .env-example .env
 ```
 
 ## Project Structure
@@ -83,9 +94,27 @@ This project is designed to be deployed to LangSmith.
 
 ## Testing
 
-- `test_langsmith.py` - Main test file for LangSmith integration
-- `test_memory.py` - Memory management tests
-- `test-bond7-agent.py` - Bond7 agent specific tests
+### Development Mode (Mock Responses)
+```bash
+export MOCK_SENTIMENT_ANALYSIS=True
+pytest test_workflow2_pytest.py -v -k "not test_llm"
+```
+
+### Production Mode (Real LLM)
+```bash
+export MOCK_SENTIMENT_ANALYSIS=False
+pytest test_workflow2_pytest.py -v
+```
+
+### Interactive Testing
+```bash
+python test_workflow2_local.py
+```
+
+## Query Testing
+```bash
+python query-langgraph.py
+```
 
 ## Notes
 

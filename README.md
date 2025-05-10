@@ -1,87 +1,60 @@
-# Workflow Testing Instructions
-
-This repository contains a workflow implementation for customer-vendor interactions. Here's how to run the tests:
+# LangSmith Workflow Implementation
 
 ## Setup
 
-1. Make sure you have Python installed
-2. Install the required packages:
+1. Create and activate virtual environment:
 ```bash
-pip install langgraph langchain-openai openai pytest
+python -m venv .venv_py311
+source .venv_py311/bin/activate  # On Windows: .venv_py311\Scripts\activate
 ```
 
-3. Set up your environment variables in a `.env` file:
+2. Install dependencies:
 ```bash
-OPENAI_API_KEY=your_api_key_here
+pip install -r requirements.txt
 ```
 
-## Testing Options
-
-### 1. Interactive Testing
-
-Run the workflow interactively to test specific scenarios:
-
-#### With Real LLM (Production Mode)
+3. Copy `.env-example` to `.env` and add your API keys:
 ```bash
-export MOCK_USER_RESPONSES=False
-export MOCK_SENTIMENT_ANALYSIS=False
-python agent/test_workflow2_local.py
+cp .env-example .env
 ```
 
-#### With Mocking (Development Mode)
+## Testing
+
+### Development Mode (Mock Responses)
 ```bash
-export MOCK_USER_RESPONSES=True
 export MOCK_SENTIMENT_ANALYSIS=True
-python agent/test_workflow2_local.py
-```
-
-### 2. Automated Testing with pytest
-
-The test suite includes various test cases for sentiment analysis, workflow initialization, and error handling.
-
-#### Run All Tests
-```bash
-pytest agent/test_workflow2_pytest.py -v
-```
-
-#### Run Only Mock Tests (No API Key Required)
-```bash
 pytest agent/test_workflow2_pytest.py -v -k "not test_llm"
 ```
 
-#### Run Only LLM Tests (Requires API Key)
+### Production Mode (Real LLM)
 ```bash
-pytest agent/test_workflow2_pytest.py -v -k "test_llm"
+export MOCK_SENTIMENT_ANALYSIS=False
+pytest agent/test_workflow2_pytest.py -v
 ```
 
-#### Test Coverage
-The test suite covers:
-- Workflow initialization
-- Sentiment analysis (both mock and LLM-based)
-  - Positive responses ("yes", "I'll do it tomorrow", etc.)
-  - Negative responses ("no", "I'm concerned about cost", etc.)
-  - Ambiguous responses ("maybe", "I'll think about it")
-- Full conversation flow
-- Error handling for invalid inputs
+### Interactive Testing
+```bash
+python agent/test_workflow2_local.py
+```
 
-### 3. Test Cases
+## Cloud Deployment
 
-#### Positive Sentiment Examples
-- "yes"
-- "I'll do it tomorrow"
-- "sounds great"
-- "will do"
+Deploy to LangSmith:
+1. Visit: https://smith.langchain.com/o/fa54f251-75d3-4005-8788-376a48b2c6c0/host/deployments
+2. Connect to repository: https://github.com/ricgene/lang-pz3
 
-#### Negative Sentiment Examples
-- "no"
-- "I can't right now"
-- "I'm concerned about the cost"
-- "the budget is too high"
+## Local Studio Testing
 
-#### Unknown Sentiment Examples
-- "maybe"
-- "I'll think about it"
-- "can you provide more information"
+Run workflow locally in LangSmith studio:
+```bash
+langgraph dev
+```
+This starts: https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024
+
+## Query Testing
+```bash
+python query-langgraph.py
+```
 
 ## Environment Variables
 
@@ -106,25 +79,6 @@ python agent/test_workflow2_local.py
 ```bash
 export MOCK_SENTIMENT_ANALYSIS=False
 pytest agent/test_workflow2_pytest.py -v
-```
-
-## Cloud Deployment
-
-Deploy to LangSmith:
-1. Visit: https://smith.langchain.com/o/fa54f251-75d3-4005-8788-376a48b2c6c0/host/deployments
-2. Connect to repository: https://github.com/ricgene/gitl/lang-pz3
-
-## Local Studio Testing
-
-Run workflow locally in LangSmith studio:
-```bash
-poetry run langgraph dev
-```
-This starts: https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024
-
-## Query Testing
-```bash
-poetry run python query-langgraph.py
 ```
 
 # Test locally from file
