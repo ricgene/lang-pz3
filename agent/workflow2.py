@@ -181,36 +181,96 @@ def analyze_sentiment(state: WorkflowState):
     
     print(f"Found human message: '{last_human_message.content}'")
     
-    # STEP 3: Analyze sentiment - simplified for deployment
+    # STEP 3: Analyze sentiment
     sentiment = ""
     reason = ""
     
     try:
-        # Simple keyword-based analysis for deployment
-        text = last_human_message.content.lower()
-        
-        if any(word in text for word in ["yes", "thanks", "great", "perfect", "will do"]):
-            sentiment = "positive"
-            reason = ""
-            print("Detected positive sentiment")
-        elif any(word in text for word in ["no", "can't", "won't", "concerned", "worried", "budget"]):
-            sentiment = "negative"
+        if MOCK_SENTIMENT_ANALYSIS:
+            # Use rule-based analysis when mocking
+            text = last_human_message.content.lower()
             
-            # Simple reason detection
-            if "budget" in text or "afford" in text or "cost" in text or "expensive" in text:
-                reason = "budget concerns"
-            elif "time" in text or "timeline" in text or "schedule" in text or "delay" in text:
-                reason = "timeline concerns"
-            elif "quality" in text or "expertise" in text or "experience" in text:
-                reason = "quality concerns"
-            else:
-                reason = "general concerns"
+            if any(word in text for word in ["yes", "thanks", "great", "perfect", "will do"]):
+                sentiment = "positive"
+                reason = ""
+                print("Detected positive sentiment")
+            elif any(word in text for word in ["no", "can't", "won't", "concerned", "worried", "budget"]):
+                sentiment = "negative"
                 
-            print(f"Detected negative sentiment with reason: {reason}")
+                # Simple reason detection
+                if "budget" in text or "afford" in text or "cost" in text or "expensive" in text:
+                    reason = "budget concerns"
+                elif "time" in text or "timeline" in text or "schedule" in text or "delay" in text:
+                    reason = "timeline concerns"
+                elif "quality" in text or "expertise" in text or "experience" in text:
+                    reason = "quality concerns"
+                else:
+                    reason = "general concerns"
+                    
+                print(f"Detected negative sentiment with reason: {reason}")
+            else:
+                sentiment = "unknown"
+                reason = "no clear sentiment indicators"
+                print("Unknown sentiment")
         else:
-            sentiment = "unknown"
-            reason = "no clear sentiment indicators"
-            print("Unknown sentiment")
+            # Use LLM for sentiment analysis
+            print("Using LLM for sentiment analysis...")
+            model = _get_model("openai")
+            if model is None:
+                raise ValueError("Failed to initialize LLM")
+            
+            # Create a prompt for sentiment analysis
+            sentiment_prompt = f"""Analyze the customer's response and determine their sentiment and reason.
+            Response: {last_human_message.content}
+            
+            Rules:
+            - If the response contains "no", "can't", "won't", or similar negative words, classify as "negative"
+            - If the response contains "yes", "sure", "okay", or similar positive words, classify as "positive"
+            - Only use "unknown" if the response is ambiguous or unclear
+            
+            Return the analysis in JSON format with two fields:
+            - sentiment: "positive", "negative", or "unknown"
+            - reason: A brief explanation of the sentiment
+            
+            Example: {{"sentiment": "positive", "reason": "customer is eager to proceed"}}"""
+            
+            # Get LLM response
+            response = model.invoke(sentiment_prompt)
+            print(f"LLM response: {response}")
+            
+            # Parse the response
+            try:
+                # Try to parse as JSON
+                import json
+                import re
+                
+                # Extract JSON from the response if it's wrapped in markdown code blocks
+                content = response.content
+                json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', content, re.DOTALL)
+                if json_match:
+                    content = json_match.group(1)
+                
+                result = json.loads(content)
+                sentiment = result.get("sentiment", "unknown")
+                reason = result.get("reason", "no reason provided")
+                
+                # Clean up the reason if it's too long
+                if len(reason) > 100:
+                    reason = reason[:97] + "..."
+                
+            except Exception as e:
+                print(f"Error parsing LLM response: {str(e)}")
+                # If JSON parsing fails, try to extract sentiment and reason from text
+                text = response.content.lower()
+                if "positive" in text:
+                    sentiment = "positive"
+                elif "negative" in text:
+                    sentiment = "negative"
+                else:
+                    sentiment = "unknown"
+                reason = "Could not parse detailed reason from response"
+            
+            print(f"LLM detected sentiment: {sentiment}, reason: {reason}")
             
     except Exception as e:
         print(f"Error in sentiment analysis: {str(e)}")
