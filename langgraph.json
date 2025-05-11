@@ -1,11 +1,11 @@
 {
-    "name": "wf2",
+    "name": "workflow2",
     "description": "Customer-vendor interaction workflow with sentiment analysis",
     "entrypoint": "agent/workflow2.py",
-    "project": "wf2",
+    "project": "prizm-workflow-2",
     "python_version": "3.11",
     "graphs": {
-       "wf2": "./agent/workflow2.py:app"
+       "workflow2": "./agent/workflow2.py:app"
     },
     "environment": {
         "MOCK_USER_RESPONSES": "false",
@@ -14,5 +14,5 @@
         "PYTHONPATH": "${PYTHONPATH}:${PWD}"
     },
     "requirements": "requirements.txt",
-    "dependencies": ["agent", "langchain_openai"]
+    "dependencies": [".", "agent"]
 }
