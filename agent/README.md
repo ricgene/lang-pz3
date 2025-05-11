@@ -55,7 +55,7 @@ python tests/test_workflow2_local.py
 
 Deploy to LangSmith:
 1. Visit: https://smith.langchain.com/o/fa54f251-75d3-4005-8788-376a48b2c6c0/host/deployments
-2. Connect to repository: https://github.com/ricgene/lang-pz3
+2. Connect to repository: https://github.com/ricgene/langpz3
 
 ## Local Studio Testing
 
@@ -131,7 +131,7 @@ This project is designed to be deployed to LangSmith.
 
 ### Cloud Deployment
 - Deployment URL: https://smith.langchain.com/o/fa54f251-75d3-4005-8788-376a48b2c6c0/host/deployments
-- Repository: https://github.com/ricgene/lang-pz3
+- Repository: https://github.com/ricgene/langpz3
 
 ## Testing
 
@@ -170,7 +170,7 @@ poetry run python query-langgraph.py
 # Test in the cloud:
 Deploy:
    https://smith.langchain.com/o/fa54f251-75d3-4005-8788-376a48b2c6c0/host/deployments
-   https://github.com/ricgene/lang-pz3
+   https://github.com/ricgene/langpz3
 
 https://smith.langchain.com/studio/thread
 

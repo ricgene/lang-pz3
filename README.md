@@ -48,7 +48,7 @@ python tests/test_workflow2_local.py
 
 Deploy to LangSmith:
 1. Visit: https://smith.langchain.com/o/fa54f251-75d3-4005-8788-376a48b2c6c0/host/deployments
-2. Connect to repository: https://github.com/ricgene/lang-pz3
+2. Connect to repository: https://github.com/ricgene/langpz3
 
 ## Local Studio Testing
 
@@ -111,7 +111,7 @@ pytest tests/test_workflow2_pytest.py -v
 ```
 
 # Test locally from file
-cd ~/gitl/lang-pz3
+cd ~/gitl/langpz3
 
 See ~gitl/pz3/client-agent/README.md
 
@@ -128,7 +128,7 @@ poetry run python query-langgraph.py
 # Test in the cloud:
 Deploy:
    https://smith.langchain.com/o/fa54f251-75d3-4005-8788-376a48b2c6c0/host/deployments
-   https://github.com/ricgene/gitl/lang-pz3
+   https://github.com/ricgene/gitl/langpz3
 
    # https://www.perplexity.ai/search/what-url-is-called-to-start-a-GXUl38JgQUSREB1WI_g5Tg
 

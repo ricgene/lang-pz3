@@ -1,23 +1,21 @@
 import sys
 import os
 import pickle
+import requests
+import json
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Add the 'agent' directory to the Python path
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'agent'))
 
-# Import the cloud version of workflow2
-from workflow2_cloud import (
-    WorkflowState,
-    validate_input,
-    initialize_state,
-    generate_initial_prompt,
-    analyze_sentiment,
-    process_sentiment,
-    process_data,
-    format_output
-)
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
-import json
+# Cloud API URL
+CLOUD_API_URL = "https://wf2-07cd4d03c5095acfa03b80a9769e007f.us.langgraph.app"
+
+# Get the LANGSMITH_API_KEY from environment variables
+LANGSMITH_API_KEY = os.getenv("LANGSMITH_API_KEY")
 
 MEMORY_DIR = os.path.join(os.path.dirname(__file__), '..', 'agent', 'memory')
 
@@ -66,12 +64,13 @@ def create_initial_state():
 def print_messages(messages):
     """Print messages in a readable format"""
     for msg in messages:
-        if isinstance(msg, SystemMessage):
-            print("\nSystem:", msg.content)
-        elif isinstance(msg, HumanMessage):
-            print("\nYou:", msg.content)
-        elif isinstance(msg, AIMessage):
-            print("\nAssistant:", msg.content)
+        if isinstance(msg, dict):
+            if msg.get("role") == "system":
+                print("\nSystem:", msg.get("content"))
+            elif msg.get("role") == "user":
+                print("\nYou:", msg.get("content"))
+            elif msg.get("role") == "assistant":
+                print("\nAssistant:", msg.get("content"))
 
 def update_state(current_state, new_state):
     """Merge new state updates with current state"""
@@ -88,9 +87,13 @@ def main():
     
     try:
         # Run through initial steps
-        state = update_state(state, validate_input(state))
-        state = update_state(state, initialize_state(state))
-        state = update_state(state, generate_initial_prompt(state))
+        headers = {"Authorization": f"Bearer {LANGSMITH_API_KEY}"}
+        response = requests.post(CLOUD_API_URL, json=state, headers=headers)
+        if response.status_code == 200:
+            state = update_state(state, response.json())
+        else:
+            print(f"Error: {response.status_code} - {response.text}")
+            return
         
         # Print initial messages
         print("\nInitial conversation:")
@@ -106,13 +109,15 @@ def main():
                 break
             
             # Add user message to state
-            state["messages"].append(HumanMessage(content=user_input))
+            state["messages"].append({"role": "user", "content": user_input})
             
             # Process the conversation
-            state = update_state(state, analyze_sentiment(state))
-            state = update_state(state, process_sentiment(state))
-            state = update_state(state, process_data(state))
-            state = update_state(state, format_output(state))
+            response = requests.post(CLOUD_API_URL, json=state, headers=headers)
+            if response.status_code == 200:
+                state = update_state(state, response.json())
+            else:
+                print(f"Error: {response.status_code} - {response.text}")
+                break
             
             # Print the conversation
             print("\nUpdated conversation:")

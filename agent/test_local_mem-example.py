@@ -2,11 +2,11 @@
 import os
 from pathlib import Path
 from dotenv import load_dotenv
-from standalone_bond7_agent import AgentState, process_input
+from workflow2 import app, WorkflowState
 from langchain_core.messages import HumanMessage, AIMessage
 
 def test_memory_persistence():
-    """Test memory persistence with a sample user"""
+    """Test memory persistence with a sample user using workflow2.py"""
     
     # Load environment variables from .env file
     env_path = Path(__file__).parent.parent / '.env'
@@ -20,27 +20,45 @@ def test_memory_persistence():
     print("✅ Environment variables loaded successfully")
     
     # Initialize state with user email
-    state = AgentState()
-    state["user"]["email"] = "test@example.com"
+    state = WorkflowState(
+        customer={"name": "Test User", "email": "test@example.com", "phoneNumber": "555-123-4567", "zipCode": "94105"},
+        task={"description": "Test Task", "category": "Testing"},
+        vendor={"name": "Test Vendor", "email": "vendor@example.com", "phoneNumber": "555-987-6543"},
+        messages=[],
+        sentiment="",
+        reason="",
+        current_step="validate",
+        sentiment_attempts=0
+    )
     
-    # First interaction - name introduction
+    # First interaction - positive sentiment
     print("\n=== First Interaction ===")
-    # Add a greeting message first
-    state["messages"].append(AIMessage(content="Hello! I'm 007, your personal productivity agent. I don't think we've met before. What's your name?"))
-    state["messages"].append(HumanMessage(content="My name is Test User"))
-    state = process_input(state)
+    state["messages"].append(AIMessage(content="Hello! I'm your AI concierge. How do you feel about starting the project?"))
+    user_response = input("Enter your response: ")
+    state["messages"].append(HumanMessage(content=user_response))
+    result = app.invoke(state)
     
-    # Second interaction - verify memory
+    # Second interaction - negative sentiment
     print("\n=== Second Interaction ===")
-    state["messages"].append(HumanMessage(content="What's my name?"))
-    state = process_input(state)
+    user_response = input("Enter your response: ")
+    state["messages"].append(HumanMessage(content=user_response))
+    result = app.invoke(state)
     
     # Create new state to test persistence
     print("\n=== Testing Persistence ===")
-    new_state = AgentState()
-    new_state["user"]["email"] = "test@example.com"
-    new_state["messages"].append(HumanMessage(content="Do you remember my name?"))
-    new_state = process_input(new_state)
+    new_state = WorkflowState(
+        customer={"name": "Test User", "email": "test@example.com", "phoneNumber": "555-123-4567", "zipCode": "94105"},
+        task={"description": "Test Task", "category": "Testing"},
+        vendor={"name": "Test Vendor", "email": "vendor@example.com", "phoneNumber": "555-987-6543"},
+        messages=[],
+        sentiment="",
+        reason="",
+        current_step="validate",
+        sentiment_attempts=0
+    )
+    user_response = input("Enter your response: ")
+    new_state["messages"].append(HumanMessage(content=user_response))
+    result = app.invoke(new_state)
     
     print("\n=== Test Complete ===")
 

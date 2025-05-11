@@ -10,6 +10,7 @@ from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage, AI
 from langgraph.graph import add_messages
 from functools import lru_cache
 import sys
+import pickle
 
 # Safe environment variable handling
 try:
@@ -65,6 +66,26 @@ def _get_model(model_name: str, system_prompt: str = None):
         # Return a mock model if initialization fails
         return None
 
+# Added file-based conversational memory utilities
+MEMORY_DIR = "./agent/memory"
+
+def get_memory_path(user_id):
+    os.makedirs(MEMORY_DIR, exist_ok=True)
+    return os.path.join(MEMORY_DIR, f"{user_id}_messages.pkl")
+
+def load_conversation_memory(user_id):
+    path = get_memory_path(user_id)
+    if os.path.exists(path):
+        with open(path, "rb") as f:
+            return pickle.load(f)
+    return []
+
+def save_conversation_memory(user_id, messages):
+    path = get_memory_path(user_id)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as f:
+        pickle.dump(messages, f)
+
 # Node Implementations
 @traceable(project_name="prizm-workflow-2")
 def validate_input(state: WorkflowState):
@@ -92,7 +113,12 @@ def validate_input(state: WorkflowState):
         state["reason"] = ""
     if "sentiment_attempts" not in state:
         state["sentiment_attempts"] = 0
-        
+    
+    # Load conversation memory if available
+    user_id = state["customer"].get("email")
+    if user_id:
+        state["messages"] = load_conversation_memory(user_id)
+    
     return state
 
 @traceable(project_name="prizm-workflow-2")
@@ -385,6 +411,11 @@ def format_output(state: WorkflowState):
         "reason": state.get("reason", ""),
         "messages": messages_dict
     }
+    
+    # Save conversation memory
+    user_id = state.get("customer", {}).get("email")
+    if user_id:
+        save_conversation_memory(user_id, state.get("messages", []))
     
     # Log what's going out
     print(f"format_output returning sentiment={result['sentiment']}, reason={result['reason']}")
