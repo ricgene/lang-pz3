@@ -26,13 +26,11 @@ data = {
 # Make the API request
 headers = {
     "Content-Type": "application/json",
-    "Authorization": f"Bearer {api_key}"
+    "x-api-key": api_key
 }
 
-url below is wrong!!!
 response = requests.post(
-    
-    "https://workflow2-5-10-cb3640c24ee559b080f87a3d156740ae.us.langgraph.app",
+    "https://api.smith.langchain.com/projects/b047ac5c-7bbc-4043-a436-3fe99b5d119b/graphs/workflow2/invoke",
     headers=headers,
     json=data
 )
